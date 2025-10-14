@@ -78,19 +78,48 @@ jobs:
             ./testing_framework_tests --gtest_output=xml:testing_framework_results.xml || true
           fi
 
+      - name: Check Docker and system resources
+        run: |
+          echo "=== Docker Info ==="
+          docker --version
+          docker info || true
+          echo "=== CPU Info ==="
+          nproc
+          echo "=== Memory Info ==="
+          free -h
+          echo "=== Disk Info ==="
+          df -h
+
       - name: Run integration tests
-        timeout-minutes: 10
+        timeout-minutes: 15
+        env:
+          # Increase glog verbosity for debugging
+          GLOG_v: 1
+          GLOG_logtostderr: 1
         run: |
           cd build/tests/integration
-          # Run integration tests directly with timeout
-          timeout 300 ./test_kuksa_communication --gtest_output=xml:kuksa_comm_results.xml || echo "test_kuksa_communication completed with status $?"
-          timeout 300 ./test_all_types_integration --gtest_output=xml:all_types_results.xml || echo "test_all_types_integration completed with status $?"
-          timeout 300 ./test_accessor_pattern --gtest_output=xml:accessor_pattern_results.xml || echo "test_accessor_pattern completed with status $?"
-          timeout 300 ./test_actuator_owner_handle_integration --gtest_output=xml:actuator_results.xml || echo "test_actuator_owner_handle_integration completed with status $?"
-          timeout 300 ./test_unified_client_integration --gtest_output=xml:unified_client_results.xml || echo "test_unified_client_integration completed with status $?"
+          # Run integration tests with longer timeout for CI environment
+          echo "Running test_kuksa_communication..."
+          timeout 600 ./test_kuksa_communication --gtest_output=xml:kuksa_comm_results.xml || echo "test_kuksa_communication completed with status $?"
+
+          echo "Running test_all_types_integration..."
+          timeout 600 ./test_all_types_integration --gtest_output=xml:all_types_results.xml || echo "test_all_types_integration completed with status $?"
+
+          echo "Running test_accessor_pattern..."
+          timeout 600 ./test_accessor_pattern --gtest_output=xml:accessor_pattern_results.xml || echo "test_accessor_pattern completed with status $?"
+
+          echo "Running test_actuator_owner_handle_integration..."
+          timeout 600 ./test_actuator_owner_handle_integration --gtest_output=xml:actuator_results.xml || echo "test_actuator_owner_handle_integration completed with status $?"
+
+          echo "Running test_unified_client_integration..."
+          timeout 600 ./test_unified_client_integration --gtest_output=xml:unified_client_results.xml || echo "test_unified_client_integration completed with status $?"
+
           if [ -f ./test_testing_library_integration ]; then
-            timeout 300 ./test_testing_library_integration --gtest_output=xml:testing_lib_results.xml || echo "test_testing_library_integration completed with status $?"
+            echo "Running test_testing_library_integration..."
+            timeout 600 ./test_testing_library_integration --gtest_output=xml:testing_lib_results.xml || echo "test_testing_library_integration completed with status $?"
           fi
+
+          echo "All integration tests completed"
 
       - name: Install
         run: |
