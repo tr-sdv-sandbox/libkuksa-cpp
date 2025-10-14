@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # Build and test job
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ \
+            cmake \
+            make \
+            git \
+            ca-certificates \
+            libssl-dev \
+            libprotobuf-dev \
+            protobuf-compiler \
+            protobuf-compiler-grpc \
+            libgrpc++-dev \
+            libgrpc-dev \
+            libgoogle-glog-dev \
+            libyaml-cpp-dev \
+            nlohmann-json3-dev \
+            libgtest-dev \
+            pkg-config
+
+      - name: Install libvss-types v0.0.1
+        run: |
+          # Clone and build libvss-types
+          git clone --depth 1 --branch v0.0.1 https://github.com/tr-sdv-sandbox/libvss-types.git /tmp/libvss-types
+          cd /tmp/libvss-types
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DVSS_TYPES_BUILD_TESTS=OFF \
+                -DVSS_TYPES_BUILD_EXAMPLES=OFF \
+                ..
+          make -j$(nproc)
+          sudo make install
+
+      - name: Configure
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DBUILD_TESTS=ON \
+                -DBUILD_EXAMPLES=ON \
+                -DWITH_TESTING=ON \
+                ..
+
+      - name: Build
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Run unit tests
+        run: |
+          cd build
+          # Run unit tests (no Docker required)
+          ctest -R "state_machine_tests|all_vss_types_tests|accessor_handle_creation_tests|testing_framework_tests" --output-on-failure --verbose
+
+      - name: Run integration tests
+        run: |
+          cd build
+          # Run integration tests (requires Docker)
+          ctest -R "integration" --output-on-failure --verbose
+
+      - name: Install
+        run: |
+          cd build
+          sudo make install
+
+      - name: Verify installation
+        run: |
+          echo "Checking installation files..."
+
+          # Check main library headers
+          test -f /usr/local/include/kuksa_cpp/kuksa.hpp && echo "✓ kuksa.hpp" || echo "✗ kuksa.hpp MISSING"
+          test -f /usr/local/include/kuksa_cpp/client.hpp && echo "✓ client.hpp" || echo "✗ client.hpp MISSING"
+          test -f /usr/local/include/kuksa_cpp/resolver.hpp && echo "✓ resolver.hpp" || echo "✗ resolver.hpp MISSING"
+          test -f /usr/local/include/kuksa_cpp/types.hpp && echo "✓ types.hpp" || echo "✗ types.hpp MISSING"
+
+          # Check state machine headers
+          test -f /usr/local/include/kuksa_cpp/state_machine/state_machine.hpp && echo "✓ state_machine.hpp" || echo "✗ state_machine.hpp MISSING"
+
+          # Check testing headers
+          test -f /usr/local/include/kuksa_cpp/testing/test_runner.hpp && echo "✓ test_runner.hpp" || echo "✗ test_runner.hpp MISSING"
+
+          # Check libraries
+          test -f /usr/local/lib/libkuksa_cpp.a && echo "✓ libkuksa_cpp.a" || echo "✗ libkuksa_cpp.a MISSING"
+          test -f /usr/local/lib/libsdv_state_machine.a && echo "✓ libsdv_state_machine.a" || echo "✗ libsdv_state_machine.a MISSING"
+          test -f /usr/local/lib/libsdv_testing.a && echo "✓ libsdv_testing.a" || echo "✗ libsdv_testing.a MISSING"
+
+          # Check CMake config
+          test -f /usr/local/lib/cmake/kuksa_cpp/kuksa_cpp-config.cmake && echo "✓ CMake config" || echo "✗ CMake config MISSING"
+
+          echo ""
+          echo "✓ All installation files present"
