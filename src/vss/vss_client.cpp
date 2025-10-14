@@ -52,14 +52,16 @@ namespace kuksa {
 // Helper functions (shared by both streams)
 // ============================================================================
 
-// Convert internal Value to protobuf Value
-static kuksa::val::v2::Value to_proto_value(const Value& value) {
+// Convert vss::types::Value to protobuf Value
+static kuksa::val::v2::Value to_proto_value(const vss::types::Value& value) {
     kuksa::val::v2::Value proto_value;
 
     std::visit([&proto_value](auto&& v) {
         using T = std::decay_t<decltype(v)>;
 
-        if constexpr (std::is_same_v<T, bool>) {
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            // Empty value - don't set anything in protobuf
+        } else if constexpr (std::is_same_v<T, bool>) {
             proto_value.set_bool_(v);
         } else if constexpr (std::is_same_v<T, int32_t>) {
             proto_value.set_int32(v);
@@ -107,8 +109,8 @@ static kuksa::val::v2::Value to_proto_value(const Value& value) {
     return proto_value;
 }
 
-// Convert protobuf Value to internal Value
-static Value from_proto_value(const kuksa::val::v2::Value& proto_value) {
+// Convert protobuf Value to vss::types::Value
+static vss::types::Value from_proto_value(const kuksa::val::v2::Value& proto_value) {
     if (proto_value.has_bool_()) return proto_value.bool_();
     if (proto_value.has_int32()) return proto_value.int32();
     if (proto_value.has_uint32()) return proto_value.uint32();
@@ -160,41 +162,54 @@ static Value from_proto_value(const kuksa::val::v2::Value& proto_value) {
         return values;
     }
 
-    return std::string();  // Default
+    return vss::types::Value{std::monostate{}};  // Default to empty
 }
 
-// Convert protobuf datapoint to optional Value
-static std::optional<Value> datapoint_to_value(const Datapoint& dp) {
-    if (!dp.has_value()) {
-        return std::nullopt;
+// Convert protobuf datapoint to DynamicQualifiedValue (with quality inference)
+static vss::types::DynamicQualifiedValue datapoint_to_qualified_value(const Datapoint& dp) {
+    vss::types::DynamicQualifiedValue qvalue;
+
+    // Set timestamp
+    if (dp.has_timestamp()) {
+        auto seconds = dp.timestamp().seconds();
+        auto nanos = dp.timestamp().nanos();
+        qvalue.timestamp = std::chrono::system_clock::time_point(
+            std::chrono::seconds(seconds) + std::chrono::nanoseconds(nanos)
+        );
+    } else {
+        qvalue.timestamp = std::chrono::system_clock::now();
     }
-    return from_proto_value(dp.value());
+
+    // Infer quality from presence of value
+    if (dp.has_value()) {
+        qvalue.value = from_proto_value(dp.value());
+        qvalue.quality = vss::types::SignalQuality::VALID;
+    } else {
+        qvalue.value = vss::types::Value{std::monostate{}};
+        qvalue.quality = vss::types::SignalQuality::NOT_AVAILABLE;
+    }
+
+    return qvalue;
 }
 
-// Convert protobuf DataType to ValueType
-static std::optional<ValueType> from_proto_datatype(kuksa::val::v2::DataType data_type) {
-    int type_value = static_cast<int>(data_type);
-    switch (static_cast<ValueType>(type_value)) {
-        case ValueType::BOOL:
-        case ValueType::INT32:
-        case ValueType::UINT32:
-        case ValueType::INT64:
-        case ValueType::UINT64:
-        case ValueType::FLOAT:
-        case ValueType::DOUBLE:
-        case ValueType::STRING:
-        case ValueType::BOOL_ARRAY:
-        case ValueType::INT32_ARRAY:
-        case ValueType::UINT32_ARRAY:
-        case ValueType::INT64_ARRAY:
-        case ValueType::UINT64_ARRAY:
-        case ValueType::FLOAT_ARRAY:
-        case ValueType::DOUBLE_ARRAY:
-        case ValueType::STRING_ARRAY:
-            return static_cast<ValueType>(type_value);
-        default:
-            return std::nullopt;
+// Convert QualifiedValue to protobuf Datapoint (with quality handling)
+static Datapoint qualified_value_to_datapoint(const vss::types::DynamicQualifiedValue& qvalue) {
+    Datapoint dp;
+
+    // Set timestamp
+    auto time_since_epoch = qvalue.timestamp.time_since_epoch();
+    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(time_since_epoch);
+    auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(time_since_epoch - seconds);
+    dp.mutable_timestamp()->set_seconds(seconds.count());
+    dp.mutable_timestamp()->set_nanos(nanos.count());
+
+    // Only set value if quality is VALID and value is not empty
+    if (qvalue.quality == vss::types::SignalQuality::VALID && !vss::types::is_empty(qvalue.value)) {
+        *dp.mutable_value() = to_proto_value(qvalue.value);
     }
+    // Otherwise leave value unset (empty datapoint)
+
+    return dp;
 }
 
 // ============================================================================
@@ -238,14 +253,14 @@ public:
     Status serve_actuator_impl(
         const std::string& path,
         int32_t signal_id,
-        ValueType type,
-        std::function<void(const Value&)> handler) override {
+        vss::types::ValueType type,
+        std::function<void(const vss::types::Value&)> handler) override {
 
         if (running_) {
             return absl::FailedPreconditionError("Cannot serve actuator while client is running");
         }
         actuator_handlers_.push_back({path, signal_id, type, handler});
-        LOG(INFO) << "Registered actuator: " << path << " (ID: " << signal_id << ", type: " << value_type_to_string(type) << ")";
+        LOG(INFO) << "Registered actuator: " << path << " (ID: " << signal_id << ", type: " << vss::types::value_type_to_string(type) << ")";
         return absl::OkStatus();
     }
 
@@ -255,7 +270,7 @@ public:
 
     void subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
-        std::function<void(const std::optional<Value>&)> callback) override {
+        std::function<void(const vss::types::DynamicQualifiedValue&)> callback) override {
 
         LOG(INFO) << "Registering subscription to " << handle->path();
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
@@ -304,7 +319,7 @@ public:
     // reads are safe. All RPC calls (GetValue, Actuate, PublishValue) use
     // per-call ClientContext which is not shared across threads.
 
-    Result<std::optional<Value>> get_impl(int32_t signal_id) override {
+    Result<vss::types::DynamicQualifiedValue> get_impl(int32_t signal_id) override {
         if (!stub_) {
             return absl::FailedPreconditionError("Not connected to databroker");
         }
@@ -323,29 +338,34 @@ public:
             );
         }
 
-        return datapoint_to_value(response.data_point());
+        return datapoint_to_qualified_value(response.data_point());
     }
 
     Status set_impl(
         int32_t signal_id,
-        const Value& value,
+        const vss::types::DynamicQualifiedValue& qvalue,
         SignalClass signal_class) override {
 
         if (!stub_) {
             return absl::FailedPreconditionError("Not connected to databroker");
         }
 
+        // Check quality - only allow VALID for synchronous set
+        if (qvalue.quality != vss::types::SignalQuality::VALID || vss::types::is_empty(qvalue.value)) {
+            return absl::InvalidArgumentError("Cannot set value with quality != VALID");
+        }
+
         // Route based on signal class
         if (signal_class == SignalClass::ACTUATOR) {
-            // Use Actuate RPC for actuators
-            return actuate_signal(signal_id, value);
+            // Use Actuate RPC for actuators (extract value)
+            return actuate_signal(signal_id, qvalue.value);
         } else {
             // Use PublishValue RPC for sensors/attributes
-            return publish_impl(signal_id, value);
+            return publish_impl(signal_id, qvalue);
         }
     }
 
-    Status actuate_signal(int32_t signal_id, const Value& value) {
+    Status actuate_signal(int32_t signal_id, const vss::types::Value& value) {
         // Use the Actuate RPC (not the provider stream)
         using kuksa::val::v2::ActuateRequest;
         using kuksa::val::v2::ActuateResponse;
@@ -372,7 +392,7 @@ public:
     // Publishing (Single and Batch)
     // ========================================================================
 
-    Status publish_impl(int32_t signal_id, const Value& value) override {
+    Status publish_impl(int32_t signal_id, const vss::types::DynamicQualifiedValue& qvalue) override {
         // Use standalone PublishValue RPC (works for all signals without registration)
         if (!stub_) {
             return absl::FailedPreconditionError("Not connected to databroker");
@@ -383,10 +403,8 @@ public:
         auto* sig_id = request.mutable_signal_id();
         sig_id->set_id(signal_id);
 
-        // Convert SDK Value to protobuf Datapoint
-        Datapoint datapoint;
-        *datapoint.mutable_value() = to_proto_value(value);
-        *request.mutable_data_point() = datapoint;
+        // Convert QualifiedValue to protobuf Datapoint (with quality handling)
+        *request.mutable_data_point() = qualified_value_to_datapoint(qvalue);
 
         PublishValueResponse response;
         grpc::Status grpc_status = stub_->PublishValue(&context, request, &response);
@@ -404,7 +422,7 @@ public:
     }
 
     Status publish_batch_impl(
-        const std::map<int32_t, Value>& values,
+        const std::map<int32_t, vss::types::DynamicQualifiedValue>& values,
         std::function<void(const std::map<int32_t, absl::Status>&)> callback) override {
 
         // Publish each value using standalone RPC
@@ -869,15 +887,15 @@ private:
     struct ActuatorRegistration {
         std::string path;
         int32_t signal_id;       // Already resolved from handle
-        ValueType type;
-        std::function<void(const Value&)> handler;  // Handle already captured in closure
+        vss::types::ValueType type;
+        std::function<void(const vss::types::Value&)> handler;  // Handle already captured in closure
     };
 
     std::vector<ActuatorRegistration> actuator_handlers_;
 
     // Subscriptions
     mutable std::mutex subscriptions_mutex_;
-    std::map<int32_t, std::function<void(const std::optional<Value>&)>> subscriptions_;
+    std::map<int32_t, std::function<void(const vss::types::DynamicQualifiedValue&)>> subscriptions_;
     std::map<int32_t, std::shared_ptr<DynamicSignalHandle>> id_to_handle_;
 };
 
