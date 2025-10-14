@@ -67,17 +67,11 @@ jobs:
           cd build
           make -j$(nproc)
 
-      - name: Run unit tests
+      - name: Run all tests
         run: |
           cd build
-          # Run unit tests (no Docker required)
-          ctest -R "state_machine_tests|all_vss_types_tests|accessor_handle_creation_tests|testing_framework_tests" --output-on-failure --verbose
-
-      - name: Run integration tests
-        run: |
-          cd build
-          # Run integration tests (requires Docker)
-          ctest -R "integration" --output-on-failure --verbose
+          # Run all tests with CTest
+          ctest --output-on-failure --verbose
 
       - name: Install
         run: |
