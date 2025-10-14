@@ -38,7 +38,7 @@ public:
     template<typename T>
     static SignalHandle<T> signal(const std::string& path, int32_t id = 1, SignalClass sclass = SignalClass::SENSOR) {
         auto dynamic = std::shared_ptr<DynamicSignalHandle>(
-            new DynamicSignalHandle(path, id, get_value_type<T>(), sclass)
+            new DynamicSignalHandle(path, id, vss::types::get_value_type<T>(), sclass)
         );
         return SignalHandle<T>(dynamic);
     }
@@ -54,7 +54,7 @@ public:
     static std::shared_ptr<DynamicSignalHandle> dynamic_signal(
         const std::string& path,
         int32_t id = 1,
-        ValueType type = ValueType::INT32,
+        vss::types::ValueType type = vss::types::ValueType::INT32,
         SignalClass sclass = SignalClass::SENSOR) {
         return std::shared_ptr<DynamicSignalHandle>(
             new DynamicSignalHandle(path, id, type, sclass)

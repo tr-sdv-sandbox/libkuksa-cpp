@@ -305,7 +305,15 @@ public:
      */
     template<typename T>
     Status publish(const SignalHandle<T>& handle, const vss::types::QualifiedValue<T>& qvalue) {
-        return publish_impl(handle.id(), qvalue);
+        vss::types::DynamicQualifiedValue dyn_qvalue;
+        if (qvalue.value.has_value()) {
+            dyn_qvalue.value = vss::types::Value(*qvalue.value);
+        } else {
+            dyn_qvalue.value = vss::types::Value(std::monostate{});
+        }
+        dyn_qvalue.quality = qvalue.quality;
+        dyn_qvalue.timestamp = qvalue.timestamp;
+        return publish_impl(handle.id(), dyn_qvalue);
     }
 
     /**
@@ -580,11 +588,11 @@ Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal)
     // Convert DynamicQualifiedValue to QualifiedValue<T>
     if (vss::types::is_empty(dyn_qvalue.value)) {
         // No value
-        return vss::types::QualifiedValue<T>{
-            std::nullopt,
-            dyn_qvalue.quality,
-            dyn_qvalue.timestamp
-        };
+        vss::types::QualifiedValue<T> qvalue;
+        qvalue.value = std::nullopt;
+        qvalue.quality = dyn_qvalue.quality;
+        qvalue.timestamp = dyn_qvalue.timestamp;
+        return qvalue;
     }
 
     const auto& value = dyn_qvalue.value;
@@ -634,7 +642,11 @@ void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::
     subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
         // Convert DynamicQualifiedValue to QualifiedValue<T>
         if (vss::types::is_empty(dyn_qvalue.value)) {
-            callback(vss::types::QualifiedValue<T>{std::nullopt, dyn_qvalue.quality, dyn_qvalue.timestamp});
+            vss::types::QualifiedValue<T> qvalue;
+            qvalue.value = std::nullopt;
+            qvalue.quality = dyn_qvalue.quality;
+            qvalue.timestamp = dyn_qvalue.timestamp;
+            callback(qvalue);
         } else {
             const auto& value = dyn_qvalue.value;
             if (std::holds_alternative<T>(value)) {

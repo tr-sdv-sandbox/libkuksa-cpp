@@ -119,11 +119,11 @@ public:
             return dynamic.status();
         }
 
-        ValueType expected_type = get_value_type<T>();
-        if (!are_types_compatible((*dynamic)->type(), expected_type)) {
+        vss::types::ValueType expected_type = vss::types::get_value_type<T>();
+        if (!vss::types::are_types_compatible((*dynamic)->type(), expected_type)) {
             return VSSError::TypeMismatch(path,
-                                         value_type_to_string(expected_type),
-                                         value_type_to_string((*dynamic)->type()));
+                                         vss::types::value_type_to_string(expected_type),
+                                         vss::types::value_type_to_string((*dynamic)->type()));
         }
 
         // Wrap cached handle in typed handle
@@ -149,13 +149,13 @@ public:
         // Not cached - query metadata
         LOG(INFO) << "Cache miss - querying metadata for " << path;
         auto metadata = query_metadata_unlocked(path);
-        if (metadata.id < 0 || !metadata.type) {
+        if (metadata.id < 0 || metadata.type == vss::types::ValueType::UNSPECIFIED) {
             return VSSError::SignalNotFound(path);
         }
 
         // Create and cache handle
         auto handle = std::shared_ptr<DynamicSignalHandle>(
-            new DynamicSignalHandle(path, metadata.id, *metadata.type, metadata.signal_class)
+            new DynamicSignalHandle(path, metadata.id, metadata.type, metadata.signal_class)
         );
         handle_cache_[path] = handle;
 

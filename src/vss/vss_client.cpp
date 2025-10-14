@@ -563,16 +563,16 @@ private:
                 continue;
             }
 
-            if (!metadata.type) {
+            if (metadata.type == vss::types::ValueType::UNSPECIFIED) {
                 errors.push_back(absl::StrFormat("  - %s: No type metadata", handler.path));
                 continue;
             }
 
-            if (!are_types_compatible(handler.type, *metadata.type)) {
+            if (!vss::types::are_types_compatible(handler.type, metadata.type)) {
                 errors.push_back(absl::StrFormat("  - %s: Type mismatch (expected %s, got %s)",
                     handler.path,
-                    value_type_to_string(handler.type),
-                    value_type_to_string(*metadata.type)));
+                    vss::types::value_type_to_string(handler.type),
+                    vss::types::value_type_to_string(metadata.type)));
                 continue;
             }
         }
@@ -663,7 +663,7 @@ private:
 
         for (const auto& actuate_req : request.actuate_requests()) {
             int32_t signal_id = actuate_req.signal_id().id();
-            Value target_value = from_proto_value(actuate_req.value());
+            vss::types::Value target_value = from_proto_value(actuate_req.value());
 
             // Find handler by signal_id and call it
             bool found = false;
@@ -795,7 +795,7 @@ private:
     }
 
     void handle_subscription_update(int32_t signal_id, const Datapoint& datapoint) {
-        std::function<void(const std::optional<Value>&)> callback;
+        std::function<void(const vss::types::DynamicQualifiedValue&)> callback;
 
         {
             std::lock_guard<std::mutex> lock(subscriptions_mutex_);
@@ -807,8 +807,8 @@ private:
 
         if (callback) {
             try {
-                auto opt_value = datapoint_to_value(datapoint);
-                callback(opt_value);
+                auto qvalue = datapoint_to_qualified_value(datapoint);
+                callback(qvalue);
             } catch (const std::exception& e) {
                 LOG(ERROR) << "Exception in subscription callback for ID " << signal_id << ": " << e.what();
             }
@@ -836,7 +836,7 @@ private:
 
     struct SignalMetadata {
         int32_t id = -1;
-        std::optional<ValueType> type;
+        vss::types::ValueType type = vss::types::ValueType::UNSPECIFIED;
     };
 
     SignalMetadata query_signal_metadata(const std::string& path) {
@@ -849,17 +849,17 @@ private:
 
         if (!grpc_status.ok()) {
             LOG(ERROR) << "Failed to query metadata for " << path;
-            return {-1, std::nullopt};
+            return {-1, vss::types::ValueType::UNSPECIFIED};
         }
 
         for (const auto& metadata : response.metadata()) {
             if (metadata.path() == path && metadata.id() != 0) {
-                auto type = from_proto_datatype(metadata.data_type());
+                auto type = static_cast<vss::types::ValueType>(metadata.data_type());
                 return {metadata.id(), type};
             }
         }
 
-        return {-1, std::nullopt};
+        return {-1, vss::types::ValueType::UNSPECIFIED};
     }
 
     // ========================================================================

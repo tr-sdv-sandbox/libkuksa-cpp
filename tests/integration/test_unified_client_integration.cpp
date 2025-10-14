@@ -79,10 +79,10 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
     std::atomic<float> last_temp{0.0f};
     std::atomic<bool> subscription_called{false};
 
-    client->subscribe(temp_sensor, [&](std::optional<float> value) {
-        if (value) {
-            LOG(INFO) << "Subscription callback: temp=" << *value;
-            last_temp = *value;
+    client->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Subscription callback: temp=" << *qvalue.value;
+            last_temp = *qvalue.value;
             subscription_called = true;
         }
     });
@@ -154,16 +154,16 @@ TEST_F(UnifiedClientIntegrationTest, BatchPublishing) {
     std::atomic<float> last_speed{0.0f};
     std::atomic<uint32_t> last_rpm{0};
 
-    subscriber->subscribe(speed, [&](std::optional<float> value) {
-        if (value) {
-            last_speed = *value;
+    subscriber->subscribe(speed, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            last_speed = *qvalue.value;
             updates_received++;
         }
     });
 
-    subscriber->subscribe(rpm, [&](std::optional<uint32_t> value) {
-        if (value) {
-            last_rpm = *value;
+    subscriber->subscribe(rpm, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
+        if (qvalue.is_valid()) {
+            last_rpm = *qvalue.value;
             updates_received++;
         }
     });
@@ -335,10 +335,10 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
     std::atomic<float> current_temp{0.0f};
 
     // Subscribe to temperature
-    hvac_controller->subscribe(temp_sensor, [&](std::optional<float> value) {
-        if (value) {
-            LOG(INFO) << "HVAC: Temperature reading: " << *value;
-            current_temp = *value;
+    hvac_controller->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "HVAC: Temperature reading: " << *qvalue.value;
+            current_temp = *qvalue.value;
         }
     });
 
@@ -367,16 +367,16 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
     std::atomic<bool> should_cool{false};
     std::atomic<bool> saw_low_temp{false};  // Track if we've seen expected low temp
 
-    temp_monitor->subscribe(temp_sensor, [&](std::optional<float> value) {
-        if (value) {
+    temp_monitor->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
             // Track if we've seen the expected low temperature (20°C)
-            if (*value >= 19.0f && *value <= 21.0f) {
+            if (*qvalue.value >= 19.0f && *qvalue.value <= 21.0f) {
                 saw_low_temp = true;
             }
 
             // Only activate cooling after we've seen the low temp (ignores stale values)
-            if (saw_low_temp.load() && *value > 25.0f && !should_cool.load()) {
-                LOG(INFO) << "Monitor: Temp " << *value << " > 25, activating cooling";
+            if (saw_low_temp.load() && *qvalue.value > 25.0f && !should_cool.load()) {
+                LOG(INFO) << "Monitor: Temp " << *qvalue.value << " > 25, activating cooling";
                 should_cool = true;
             }
         }
@@ -452,8 +452,8 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
 
     std::atomic<int> subscription_count{0};
 
-    actuator_client->subscribe(sensor, [&](std::optional<float> value) {
-        if (value) {
+    actuator_client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
             subscription_count++;
         }
     });
@@ -616,10 +616,10 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
     std::atomic<int> observation_count{0};
     std::atomic<bool> last_observed_value{false};
 
-    observer->subscribe(door_lock, [&](std::optional<bool> value) {
-        if (value) {
-            LOG(INFO) << "Observer: Saw door lock actual value: " << *value;
-            last_observed_value = *value;
+    observer->subscribe(door_lock, [&](vss::types::QualifiedValue<bool> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Observer: Saw door lock actual value: " << *qvalue.value;
+            last_observed_value = *qvalue.value;
             observation_count++;
         }
     });
