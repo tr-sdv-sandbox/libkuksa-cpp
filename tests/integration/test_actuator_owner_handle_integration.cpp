@@ -60,7 +60,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, TypedAPI) {
     Client* client_ptr = client.get();
 
     // Register actuator with typed handler - handle is passed in, same one used for publishing
-    client->serve_actuator(actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status = client->serve_actuator(actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client received target: " << target;
         target_received = target;
         target_count++;
@@ -76,6 +76,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, TypedAPI) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
+    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // Subscribe to monitor actual values (same client!)
     client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
@@ -86,7 +87,8 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, TypedAPI) {
         }
     });
 
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -164,7 +166,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, DynamicAPI) {
 
     // Add dynamic handler BEFORE starting (simulating YAML/config loading)
     LOG(INFO) << "Adding dynamic handler for INT32 actuator";
-    client->serve_actuator(actuator_handle, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
+    auto serve_status2 = client->serve_actuator(actuator_handle, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
         int32_t val = std::get<int32_t>(value);
         LOG(INFO) << "Dynamic handler received: " << val;
         last_value = val;
@@ -177,6 +179,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, DynamicAPI) {
             LOG(ERROR) << "Failed to publish: " << status;
         }
     });
+    ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
     // Subscribe to monitor actual values
     client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
@@ -188,7 +191,8 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, DynamicAPI) {
     });
 
     // Start AFTER adding handlers and subscriptions
-    client->start();
+    auto start_status2 = client->start();
+    ASSERT_TRUE(start_status2.ok()) << "Failed to start client: " << start_status2;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -261,7 +265,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, MixedTypedAndDynamicAPI) {
     Client* client_ptr = client.get();
 
     // Register typed handler
-    client->serve_actuator(uint_actuator, [&, client_ptr](uint32_t target, const SignalHandle<uint32_t>& handle) {
+    auto serve_status3 = client->serve_actuator(uint_actuator, [&, client_ptr](uint32_t target, const SignalHandle<uint32_t>& handle) {
         LOG(INFO) << "Typed handler received: " << target;
         typed_value = target;
         typed_calls++;
@@ -271,9 +275,10 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, MixedTypedAndDynamicAPI) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
+    ASSERT_TRUE(serve_status3.ok()) << "Failed to register typed actuator: " << serve_status3;
 
     // Register dynamic handler
-    client->serve_actuator(float_actuator_dyn, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
+    auto serve_status4 = client->serve_actuator(float_actuator_dyn, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
         float val = std::get<float>(value);
         LOG(INFO) << "Dynamic handler received: " << val;
         dynamic_value = val;
@@ -285,6 +290,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, MixedTypedAndDynamicAPI) {
             LOG(ERROR) << "Failed to publish: " << status;
         }
     });
+    ASSERT_TRUE(serve_status4.ok()) << "Failed to register dynamic actuator: " << serve_status4;
 
     // Subscribe to both actuators
     client->subscribe(uint_actuator, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
@@ -301,7 +307,8 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, MixedTypedAndDynamicAPI) {
         }
     });
 
-    client->start();
+    auto start_status3 = client->start();
+    ASSERT_TRUE(start_status3.ok()) << "Failed to start client: " << start_status3;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -366,15 +373,17 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ConcurrentPublishing) {
     Client* client_ptr = client.get();
 
     // Register actuator handler
-    client->serve_actuator(actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status5 = client->serve_actuator(actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         // Just ack
         auto status = client_ptr->publish(handle, target);
         if (!status.ok()) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
+    ASSERT_TRUE(serve_status5.ok()) << "Failed to register actuator: " << serve_status5;
 
-    client->start();
+    auto start_status4 = client->start();
+    ASSERT_TRUE(start_status4.ok()) << "Failed to start client: " << start_status4;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -449,7 +458,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ArrayTypes) {
     Client* client_ptr = client.get();
 
     // Register dynamic handler for int32 array
-    client->serve_actuator(actuator_dyn, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
+    auto serve_status6 = client->serve_actuator(actuator_dyn, [&, client_ptr](const vss::types::Value& value, const DynamicSignalHandle& handle) {
         auto arr = std::get<std::vector<int32_t>>(value);
         LOG(INFO) << "Array handler received actuation request with " << arr.size() << " elements";
 
@@ -460,6 +469,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ArrayTypes) {
             LOG(ERROR) << "Failed to publish: " << status;
         }
     });
+    ASSERT_TRUE(serve_status6.ok()) << "Failed to register actuator: " << serve_status6;
 
     // Subscribe to monitor actual values
     client->subscribe(actuator, [&](vss::types::QualifiedValue<std::vector<int32_t>> qvalue) {
@@ -471,7 +481,8 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ArrayTypes) {
         }
     });
 
-    client->start();
+    auto start_status5 = client->start();
+    ASSERT_TRUE(start_status5.ok()) << "Failed to start client: " << start_status5;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));

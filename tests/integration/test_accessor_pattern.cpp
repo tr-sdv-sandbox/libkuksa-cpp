@@ -244,7 +244,7 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
     auto client = *Client::create(getKuksaAddress());
     client_ptr = client.get();
 
-    client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status = client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client received actuation command: " << target;
         last_actuator_command = target;
 
@@ -254,8 +254,10 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
+    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -294,7 +296,8 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
         }
     });
 
-    subscriber->start();
+    auto sub_start_status = subscriber->start();
+    ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
 
     // Wait for subscriber to be ready
     auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
@@ -359,7 +362,7 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     auto client = *Client::create(getKuksaAddress());
     client_ptr = client.get();
 
-    client->serve_actuator(client_actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status2 = client->serve_actuator(client_actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client processing command: " << target;
         actuator_commands_received++;
 
@@ -372,8 +375,10 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
+    ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
-    client->start();
+    auto start_status2 = client->start();
+    ASSERT_TRUE(start_status2.ok()) << "Failed to start client: " << start_status2;
 
     // Wait for client to be ready
     auto ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -417,7 +422,8 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
         }
     });
 
-    subscriber->start();
+    auto sub_start_status2 = subscriber->start();
+    ASSERT_TRUE(sub_start_status2.ok()) << "Failed to start subscriber: " << sub_start_status2;
 
     // Wait for subscriber to be ready
     auto ready_status2 = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
