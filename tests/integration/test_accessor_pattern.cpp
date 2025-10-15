@@ -287,10 +287,10 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
     auto subscriber = *Client::create(getKuksaAddress());
 
     // Subscribe to temperature updates (using test sensor)
-    subscriber->subscribe(cabin_temp, [&state_machine](std::optional<float> temp) {
-        if (temp) {
+    subscriber->subscribe(cabin_temp, [&state_machine](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
             // Non-blocking call - just posts event
-            state_machine.on_temperature_update(*temp);
+            state_machine.on_temperature_update(*qvalue.value);
         }
     });
 
@@ -398,10 +398,10 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     std::atomic<int32_t> sensor_updates_received(0);
     std::atomic<float> last_sensor_value(0.0f);
 
-    subscriber->subscribe(test_sensor, [&](std::optional<float> value) {
-        if (value) {
-            LOG(INFO) << "Subscriber received sensor update: " << *value;
-            last_sensor_value = *value;
+    subscriber->subscribe(test_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Subscriber received sensor update: " << *qvalue.value;
+            last_sensor_value = *qvalue.value;
             sensor_updates_received++;
         }
     });
@@ -409,10 +409,10 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     std::atomic<int32_t> actuator_updates_received(0);
     std::atomic<int32_t> last_actuator_value(0);
 
-    subscriber->subscribe(test_actuator, [&](std::optional<int32_t> value) {
-        if (value) {
-            LOG(INFO) << "Subscriber received actuator feedback: " << *value;
-            last_actuator_value = *value;
+    subscriber->subscribe(test_actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Subscriber received actuator feedback: " << *qvalue.value;
+            last_actuator_value = *qvalue.value;
             actuator_updates_received++;
         }
     });
@@ -474,8 +474,8 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     LOG(INFO) << "Accessor reading current values...";
     auto sensor_value_result = accessor->get(sensor_handle);
     ASSERT_TRUE(sensor_value_result.ok()) << "Failed to get sensor value: " << sensor_value_result.status();
-    ASSERT_TRUE(sensor_value_result->has_value()) << "Sensor value is NONE";
-    EXPECT_FLOAT_EQ(**sensor_value_result, 42.5f);
+    ASSERT_TRUE(sensor_value_result->is_valid()) << "Sensor value is not valid";
+    EXPECT_FLOAT_EQ(*sensor_value_result->value, 42.5f);
     
     // Summary
     LOG(INFO) << "Pattern demonstration complete:";
@@ -524,7 +524,7 @@ TEST_F(AccessorPatternTest, ThreadSafetyStressTest) {
                     }
                 } else {
                     auto result = accessor->get(test_sensor);
-                    if (result.ok() && result->has_value()) {
+                    if (result.ok() && result->is_valid()) {
                         successful_ops++;
                     }
                 }

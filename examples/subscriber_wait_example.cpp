@@ -41,9 +41,9 @@ int main(int argc, char* argv[]) {
         }
         auto speed = *speed_result;
 
-        subscriber->subscribe(speed, [](std::optional<float> value) {
-            if (value) {
-                LOG(INFO) << "Speed: " << *value << " km/h";
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+            if (qvalue.is_valid()) {
+                LOG(INFO) << "Speed: " << *qvalue.value << " km/h";
             }
         });
 
@@ -85,9 +85,9 @@ int main(int argc, char* argv[]) {
         auto speed_result = (*resolver)->get<float>("Vehicle.Speed");
         auto speed = *speed_result;
 
-        subscriber->subscribe(speed, [](std::optional<float> value) {
-            if (value) {
-                LOG(INFO) << "Speed: " << *value << " km/h";
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+            if (qvalue.is_valid()) {
+                LOG(INFO) << "Speed: " << *qvalue.value << " km/h";
             }
         });
 
@@ -122,7 +122,7 @@ int main(int argc, char* argv[]) {
         auto speed_result = (*resolver)->get<float>("Vehicle.Speed");
         auto speed = *speed_result;
 
-        subscriber->subscribe(speed, [](std::optional<float> value) {});
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {});
 
         subscriber->start();
 

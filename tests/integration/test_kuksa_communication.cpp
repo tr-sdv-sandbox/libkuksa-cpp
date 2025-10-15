@@ -177,8 +177,8 @@ TEST_F(KuksaCommunicationTest, AccessorPublishing) {
     // Verify value was published by reading it back
     auto value_result = accessor->get(sensor);
     ASSERT_TRUE(value_result.ok()) << "Failed to get value: " << value_result.status();
-    ASSERT_TRUE(value_result->has_value()) << "Value is NONE after publishing";
-    EXPECT_FLOAT_EQ(**value_result, 23.5f);
+    ASSERT_TRUE(value_result->is_valid()) << "Value is not valid after publishing";
+    EXPECT_FLOAT_EQ(*value_result->value, 23.5f);
 }
 
 // Test 5: Subscription to sensor values using Client
@@ -210,15 +210,15 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
     std::atomic<int> update_count(0);
     std::atomic<float> received_value(0);
 
-    client->subscribe(sensor, [&](std::optional<float> value) {
+    client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         LOG(INFO) << "Subscription received update: "
-                  << (value.has_value() ? std::to_string(*value) : "NONE")
+                  << (qvalue.is_valid() ? std::to_string(*qvalue.value) : "NOT_VALID")
                   << " (count: " << update_count.load() + 1 << ")";
-        if (value.has_value()) {
-            received_value.store(*value);
+        if (qvalue.is_valid()) {
+            received_value.store(*qvalue.value);
             update_count.fetch_add(1);
         } else {
-            LOG(INFO) << "Skipping NONE value";
+            LOG(INFO) << "Skipping invalid value";
         }
     });
 
@@ -292,23 +292,23 @@ TEST_F(KuksaCommunicationTest, MultipleSubscriptions) {
     // Set up multiple subscriptions
     std::atomic<int> updates_received(0);
 
-    subscriber->subscribe(sensor1, [&](std::optional<float> value) {
-        if (value.has_value()) {
-            LOG(INFO) << "Sensor1 update: " << *value;
+    subscriber->subscribe(sensor1, [&](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Sensor1 update: " << *qvalue.value;
             updates_received++;
         }
     });
 
-    subscriber->subscribe(sensor2, [&](std::optional<int32_t> value) {
-        if (value.has_value()) {
-            LOG(INFO) << "Sensor2 update: " << *value;
+    subscriber->subscribe(sensor2, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Sensor2 update: " << *qvalue.value;
             updates_received++;
         }
     });
 
-    subscriber->subscribe(sensor3, [&](std::optional<bool> value) {
-        if (value.has_value()) {
-            LOG(INFO) << "Sensor3 update: " << *value;
+    subscriber->subscribe(sensor3, [&](vss::types::QualifiedValue<bool> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Sensor3 update: " << *qvalue.value;
             updates_received++;
         }
     });
@@ -385,10 +385,10 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
     std::atomic<bool> actual_updated(false);
     std::atomic<int32_t> actual_value(0);
 
-    subscriber->subscribe(actuator_ro, [&](std::optional<int32_t> value) {
-        if (value.has_value()) {
-            LOG(INFO) << "Actual value updated to: " << *value;
-            actual_value = *value;
+    subscriber->subscribe(actuator_ro, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Actual value updated to: " << *qvalue.value;
+            actual_value = *qvalue.value;
             actual_updated = true;
         }
     });
@@ -446,14 +446,14 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     std::vector<int32_t> received_values;
     std::mutex values_mutex;
 
-    subscriber->subscribe(actuator, [&](std::optional<int32_t> value) {
+    subscriber->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         int count = subscription_updates.fetch_add(1) + 1;
-        if (value.has_value()) {
-            LOG(INFO) << "Subscription callback #" << count << ": value = " << *value;
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Subscription callback #" << count << ": value = " << *qvalue.value;
             std::lock_guard<std::mutex> lock(values_mutex);
-            received_values.push_back(*value);
+            received_values.push_back(*qvalue.value);
         } else {
-            LOG(INFO) << "Subscription callback #" << count << ": NONE";
+            LOG(INFO) << "Subscription callback #" << count << ": NOT_VALID";
         }
     });
 
@@ -682,17 +682,17 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
     std::set<int32_t> unique_values_received;
     std::mutex values_mutex;
 
-    subscriber->subscribe(sensor, [&](std::optional<int32_t> value) {
-        if (value.has_value()) {
+    subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+        if (qvalue.is_valid()) {
             int count = updates_received.fetch_add(1) + 1;
-            LOG(INFO) << "Received update #" << count << ": " << *value;
-            
+            LOG(INFO) << "Received update #" << count << ": " << *qvalue.value;
+
             {
                 std::lock_guard<std::mutex> lock(values_mutex);
-                unique_values_received.insert(*value);
+                unique_values_received.insert(*qvalue.value);
             }
-            
-            if (*value == INITIAL_VALUE) {
+
+            if (*qvalue.value == INITIAL_VALUE) {
                 initial_value_received = true;
                 LOG(INFO) << "Received initial subscription value";
             }

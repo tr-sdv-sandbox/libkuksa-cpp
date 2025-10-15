@@ -67,9 +67,9 @@ int main(int argc, char** argv) {
     }
     auto speed = *speed_result;
 
-    client->subscribe(speed, [](std::optional<float> value) {
-        if (value) {
-            LOG(INFO) << "Speed update: " << *value << " km/h";
+    client->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+        if (qvalue.is_valid()) {
+            LOG(INFO) << "Speed update: " << *qvalue.value << " km/h";
         }
     });
 

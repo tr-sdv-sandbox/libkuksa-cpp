@@ -66,10 +66,10 @@ private:
     std::unordered_map<std::string, std::shared_ptr<kuksa::DynamicSignalHandle>> handle_cache_;
 
     // Helper to convert TestValue to Value
-    kuksa::Value test_value_to_value(const TestValue& test_value);
+    vss::types::Value test_value_to_value(const TestValue& test_value);
 
     // Helper to convert Value to TestValue (handles subset only)
-    std::optional<TestValue> value_to_test_value(const kuksa::Value& value);
+    std::optional<TestValue> value_to_test_value(const vss::types::Value& value);
 };
 
 } // namespace testing

@@ -64,9 +64,9 @@ protected:
         T received_value{};
 
         // Subscribe
-        subscriber->subscribe(sensor, [&](std::optional<T> value) {
-            if (value) {
-                received_value = *value;
+        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+            if (qvalue.is_valid()) {
+                received_value = *qvalue.value;
                 received = true;
             }
         });
@@ -126,9 +126,9 @@ protected:
         T received_value{};
 
         // Subscribe
-        subscriber->subscribe(sensor, [&](std::optional<T> value) {
-            if (value) {
-                received_value = *value;
+        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+            if (qvalue.is_valid()) {
+                received_value = *qvalue.value;
                 received = true;
             }
         });
@@ -183,9 +183,9 @@ protected:
         std::atomic<bool> actual_received(false);
         T actual_value{};
 
-        subscriber->subscribe(actuator_handle, [&](std::optional<T> value) {
-            if (value) {
-                actual_value = *value;
+        subscriber->subscribe(actuator_handle, [&](vss::types::QualifiedValue<T> qvalue) {
+            if (qvalue.is_valid()) {
+                actual_value = *qvalue.value;
                 actual_received = true;
             }
         });
@@ -299,7 +299,7 @@ protected:
             return false;
         }
 
-        return value_result->has_value() && **value_result == test_value;
+        return value_result->is_valid() && *value_result->value == test_value;
     }
 };
 

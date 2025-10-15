@@ -145,8 +145,8 @@ public:
         return serve_actuator_impl(
             handle.path(),
             handle.id(),
-            get_value_type<T>(),
-            [callback = std::forward<Callback>(callback), handle](const Value& value) mutable {
+            vss::types::get_value_type<T>(),
+            [callback = std::forward<Callback>(callback), handle](const vss::types::Value& value) mutable {
                 callback(std::get<T>(value), handle);
             }
         );
@@ -169,7 +169,7 @@ public:
             handle.path(),
             handle.id(),
             handle.type(),
-            [callback = std::forward<Callback>(callback), handle](const Value& value) mutable {
+            [callback = std::forward<Callback>(callback), handle](const vss::types::Value& value) mutable {
                 callback(value, handle);
             }
         );
@@ -182,8 +182,8 @@ public:
     virtual Status serve_actuator_impl(
         const std::string& path,
         int32_t signal_id,
-        ValueType type,
-        std::function<void(const Value&)> handler
+        vss::types::ValueType type,
+        std::function<void(const vss::types::Value&)> handler
     ) = 0;
 
     // ========================================================================
@@ -191,18 +191,22 @@ public:
     // ========================================================================
 
     /**
-     * @brief Synchronously get current signal value
+     * @brief Synchronously get current signal value with quality
      *
      * Works for all signal types (sensors, attributes, actuators).
      * For actuators, returns the ACTUAL (feedback) value.
+     *
+     * Returns a QualifiedValue with quality inferred from KUKSA:
+     * - Has value → SignalQuality::VALID
+     * - No value → SignalQuality::NOT_AVAILABLE
      *
      * Thread-safe. Can be called from any thread, even before start().
      * Does not require starting the client streams.
      *
      * @param signal Signal handle (read-only or read-write)
-     * @return Result containing optional value:
-     *         - Success with value: Signal has a value
-     *         - Success with nullopt: Signal exists but has no value (NONE state)
+     * @return Result containing QualifiedValue:
+     *         - Success with value and VALID: Signal has valid value
+     *         - Success with no value and NOT_AVAILABLE: Signal has no value
      *         - Error: Connection or communication failure
      *
      * Example:
@@ -211,49 +215,60 @@ public:
      * auto result = client->get(*speed);
      * if (!result.ok()) {
      *     LOG(ERROR) << "Failed to get speed: " << result.status();
-     * } else if (result->has_value()) {
-     *     LOG(INFO) << "Speed: " << **result;
+     * } else if (result->is_valid()) {
+     *     LOG(INFO) << "Speed: " << *result->value;
      * } else {
-     *     LOG(INFO) << "Speed is NONE";
+     *     LOG(INFO) << "Speed not available";
      * }
      * @endcode
      */
     template<typename T>
-    Result<std::optional<T>> get(const SignalHandle<T>& signal);
+    Result<vss::types::QualifiedValue<T>> get(const SignalHandle<T>& signal);
 
     /**
      * @brief Synchronously get value with dynamic handle
      */
-    Result<std::optional<Value>> get(const DynamicSignalHandle& signal);
+    Result<vss::types::DynamicQualifiedValue> get(const DynamicSignalHandle& signal);
 
     /**
-     * @brief Synchronously set signal value
+     * @brief Synchronously set signal value with quality
      *
      * Automatically routes to the appropriate RPC based on signal class:
      * - Actuators: Actuate() RPC (sends TARGET command to provider)
      * - Sensors/Attributes: PublishValue() RPC
      *
+     * Quality handling:
+     * - Only VALID quality values are sent
+     * - Non-VALID quality returns InvalidArgumentError
+     *
      * Thread-safe. Can be called from any thread, even before start().
      * Does not require starting the client streams.
      *
      * @param signal Signal handle
-     * @param value Value to set
+     * @param qvalue Qualified value with quality indicator
      * @return Status indicating success or failure
      *
      * Example:
      * @code
+     * using namespace vss::types;
+     *
      * auto door = resolver->get<bool>("Vehicle.Door.IsLocked");
-     * auto status = client->set(*door, true);  // Commands actuator
+     * auto status = client->set(*door, QualifiedValue{true, SignalQuality::VALID});
      * if (!status.ok()) {
      *     LOG(ERROR) << "Failed to set door lock: " << status;
      * }
-     *
-     * auto temp = resolver->get<float>("Vehicle.Temperature");
-     * client->set(*temp, 23.5f);  // Publishes sensor value
      * @endcode
      */
     template<typename T>
-    Status set(const SignalHandle<T>& signal, T value);
+    Status set(const SignalHandle<T>& signal, const vss::types::QualifiedValue<T>& qvalue);
+
+    /**
+     * @brief Convenience: Set with plain value (assumes VALID quality)
+     */
+    template<typename T>
+    Status set(const SignalHandle<T>& signal, T value) {
+        return set(signal, vss::types::QualifiedValue<T>{value, vss::types::SignalQuality::VALID});
+    }
 
     /**
      * @brief Convenience overload for string signals with const char*
@@ -263,7 +278,7 @@ public:
     /**
      * @brief Synchronously set value with dynamic handle
      */
-    Status set(const DynamicSignalHandle& signal, const Value& value);
+    Status set(const DynamicSignalHandle& signal, const vss::types::DynamicQualifiedValue& qvalue);
 
     // ========================================================================
     // PUBLISH API (Single and Batch)
@@ -276,43 +291,74 @@ public:
     // communication (receiving target values from KUKSA).
 
     /**
-     * @brief Publish a single value
+     * @brief Publish a single value with quality
+     *
+     * Quality mapping:
+     * - VALID quality → value is sent
+     * - Any other quality → empty datapoint sent (notifies subscribers)
      *
      * Thread-safe. Can be called from any thread after start().
      *
      * @param handle Signal handle
-     * @param value Value to publish
+     * @param qvalue Qualified value with quality indicator
      * @return Status indicating success or failure
      */
     template<typename T>
-    Status publish(const SignalHandle<T>& handle, T value) {
-        return publish_impl(handle.id(), Value{value});
+    Status publish(const SignalHandle<T>& handle, const vss::types::QualifiedValue<T>& qvalue) {
+        vss::types::DynamicQualifiedValue dyn_qvalue;
+        if (qvalue.value.has_value()) {
+            dyn_qvalue.value = vss::types::Value(*qvalue.value);
+        } else {
+            dyn_qvalue.value = vss::types::Value(std::monostate{});
+        }
+        dyn_qvalue.quality = qvalue.quality;
+        dyn_qvalue.timestamp = qvalue.timestamp;
+        return publish_impl(handle.id(), dyn_qvalue);
     }
 
     /**
-     * @brief Publish a single value using dynamic handle
+     * @brief Convenience: Publish plain value (assumes VALID quality)
      */
-    Status publish(const DynamicSignalHandle& handle, const Value& value) {
-        return publish_impl(handle.id(), value);
+    template<typename T>
+    Status publish(const SignalHandle<T>& handle, T value) {
+        return publish(handle, vss::types::QualifiedValue<T>{value, vss::types::SignalQuality::VALID});
+    }
+
+    /**
+     * @brief Publish using dynamic handle
+     */
+    Status publish(const DynamicSignalHandle& handle, const vss::types::DynamicQualifiedValue& qvalue) {
+        return publish_impl(handle.id(), qvalue);
     }
 
     /**
      * @brief Helper struct for type-safe batch publishing
      *
-     * Allows {handle, value} pairs without explicit Value{} wrapper.
+     * Allows {handle, value} pairs without explicit QualifiedValue wrapper.
      */
     struct PublishEntry {
         int32_t signal_id;
-        Value value;
+        vss::types::DynamicQualifiedValue qvalue;
 
-        // Construct from typed handle and value
+        // Construct from typed handle and QualifiedValue
+        template<typename T>
+        PublishEntry(const SignalHandle<T>& handle, const vss::types::QualifiedValue<T>& qv)
+            : signal_id(handle.id()) {
+            if (qv.value.has_value()) {
+                qvalue.value = vss::types::Value{*qv.value};
+            }
+            qvalue.quality = qv.quality;
+            qvalue.timestamp = qv.timestamp;
+        }
+
+        // Construct from typed handle and plain value (assumes VALID)
         template<typename T>
         PublishEntry(const SignalHandle<T>& handle, T val)
-            : signal_id(handle.id()), value(std::move(val)) {}
+            : signal_id(handle.id()), qvalue(vss::types::Value{val}, vss::types::SignalQuality::VALID) {}
 
-        // Construct from dynamic handle and value
-        PublishEntry(const DynamicSignalHandle& handle, Value val)
-            : signal_id(handle.id()), value(std::move(val)) {}
+        // Construct from dynamic handle and QualifiedValue
+        PublishEntry(const DynamicSignalHandle& handle, vss::types::DynamicQualifiedValue qv)
+            : signal_id(handle.id()), qvalue(std::move(qv)) {}
     };
 
     /**
@@ -353,9 +399,9 @@ public:
         std::initializer_list<PublishEntry> entries,
         std::function<void(const std::map<int32_t, Status>&)> callback = nullptr
     ) {
-        std::map<int32_t, Value> values;
+        std::map<int32_t, vss::types::DynamicQualifiedValue> values;
         for (const auto& entry : entries) {
-            values[entry.signal_id] = entry.value;
+            values[entry.signal_id] = entry.qvalue;
         }
         return publish_batch_impl(values, callback);
     }
@@ -367,9 +413,9 @@ public:
         const std::vector<PublishEntry>& entries,
         std::function<void(const std::map<int32_t, Status>&)> callback = nullptr
     ) {
-        std::map<int32_t, Value> values;
+        std::map<int32_t, vss::types::DynamicQualifiedValue> values;
         for (const auto& entry : entries) {
-            values[entry.signal_id] = entry.value;
+            values[entry.signal_id] = entry.qvalue;
         }
         return publish_batch_impl(values, callback);
     }
@@ -401,7 +447,7 @@ public:
     /**
      * @brief Subscribe with dynamic handle
      */
-    void subscribe(const DynamicSignalHandle& signal, std::function<void(const std::optional<Value>&)> callback);
+    void subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
 
     /**
      * @brief Unsubscribe from a signal
@@ -490,25 +536,25 @@ protected:
     Client() = default;
 
     // Internal implementations for sync read/write
-    virtual Result<std::optional<Value>> get_impl(int32_t signal_id) = 0;
+    virtual Result<vss::types::DynamicQualifiedValue> get_impl(int32_t signal_id) = 0;
 
     virtual Status set_impl(
         int32_t signal_id,
-        const Value& value,
+        const vss::types::DynamicQualifiedValue& qvalue,
         SignalClass signal_class
     ) = 0;
 
     // Internal implementations for async operations
-    virtual Status publish_impl(int32_t signal_id, const Value& value) = 0;
+    virtual Status publish_impl(int32_t signal_id, const vss::types::DynamicQualifiedValue& qvalue) = 0;
 
     virtual Status publish_batch_impl(
-        const std::map<int32_t, Value>& values,
+        const std::map<int32_t, vss::types::DynamicQualifiedValue>& values,
         std::function<void(const std::map<int32_t, Status>&)> callback
     ) = 0;
 
     virtual void subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
-        std::function<void(const std::optional<Value>&)> callback
+        std::function<void(const vss::types::DynamicQualifiedValue&)> callback
     ) = 0;
 
     virtual bool unsubscribe_impl(int32_t signal_id) = 0;
@@ -519,7 +565,7 @@ protected:
     template<typename T>
     static SignalHandle<T> make_typed_handle(const std::string& path, int32_t signal_id, SignalClass sclass = SignalClass::UNKNOWN) {
         auto dynamic = std::shared_ptr<DynamicSignalHandle>(
-            new DynamicSignalHandle(path, signal_id, get_value_type<T>(), sclass)
+            new DynamicSignalHandle(path, signal_id, vss::types::get_value_type<T>(), sclass)
         );
         return SignalHandle<T>(dynamic);
     }
@@ -531,59 +577,83 @@ protected:
 
 // Synchronous get() implementations
 template<typename T>
-Result<std::optional<T>> Client::get(const SignalHandle<T>& signal) {
+Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal) {
     auto result = get_impl(signal.id());
     if (!result.ok()) {
         return result.status();
     }
 
-    const auto& opt_value = *result;
-    if (!opt_value.has_value()) {
-        return std::optional<T>(std::nullopt);
+    const auto& dyn_qvalue = *result;
+
+    // Convert DynamicQualifiedValue to QualifiedValue<T>
+    if (vss::types::is_empty(dyn_qvalue.value)) {
+        // No value
+        vss::types::QualifiedValue<T> qvalue;
+        qvalue.value = std::nullopt;
+        qvalue.quality = dyn_qvalue.quality;
+        qvalue.timestamp = dyn_qvalue.timestamp;
+        return qvalue;
     }
 
-    const auto& value = *opt_value;
+    const auto& value = dyn_qvalue.value;
     if (!std::holds_alternative<T>(value)) {
         return absl::InvalidArgumentError(
             absl::StrFormat("Type mismatch for %s: expected type index %d, got %d",
-                signal.path(), Value(T{}).index(), value.index())
+                signal.path(), vss::types::Value(T{}).index(), value.index())
         );
     }
 
-    return std::optional<T>(std::get<T>(value));
+    return vss::types::QualifiedValue<T>{
+        std::get<T>(value),
+        dyn_qvalue.quality,
+        dyn_qvalue.timestamp
+    };
 }
 
-inline Result<std::optional<Value>> Client::get(const DynamicSignalHandle& signal) {
+inline Result<vss::types::DynamicQualifiedValue> Client::get(const DynamicSignalHandle& signal) {
     return get_impl(signal.id());
 }
 
 // Synchronous set() implementations
 template<typename T>
-Status Client::set(const SignalHandle<T>& signal, T value) {
-    return set_impl(signal.id(), Value{value}, signal.signal_class());
+Status Client::set(const SignalHandle<T>& signal, const vss::types::QualifiedValue<T>& qvalue) {
+    // Convert to DynamicQualifiedValue
+    vss::types::DynamicQualifiedValue dyn_qvalue;
+    if (qvalue.value.has_value()) {
+        dyn_qvalue.value = vss::types::Value{*qvalue.value};
+    }
+    dyn_qvalue.quality = qvalue.quality;
+    dyn_qvalue.timestamp = qvalue.timestamp;
+
+    return set_impl(signal.id(), dyn_qvalue, signal.signal_class());
 }
 
 inline Status Client::set(const SignalHandle<std::string>& signal, const char* value) {
-    return set_impl(signal.id(), Value{std::string(value)}, signal.signal_class());
+    return set(signal, vss::types::QualifiedValue<std::string>{std::string(value), vss::types::SignalQuality::VALID});
 }
 
-inline Status Client::set(const DynamicSignalHandle& signal, const Value& value) {
-    return set_impl(signal.id(), value, signal.signal_class());
+inline Status Client::set(const DynamicSignalHandle& signal, const vss::types::DynamicQualifiedValue& qvalue) {
+    return set_impl(signal.id(), qvalue, signal.signal_class());
 }
 
 // Subscription implementations
 template<typename T>
 void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
-    subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const std::optional<Value>& opt_value) {
-        if (!opt_value.has_value()) {
-            callback(std::nullopt);
+    subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
+        // Convert DynamicQualifiedValue to QualifiedValue<T>
+        if (vss::types::is_empty(dyn_qvalue.value)) {
+            vss::types::QualifiedValue<T> qvalue;
+            qvalue.value = std::nullopt;
+            qvalue.quality = dyn_qvalue.quality;
+            qvalue.timestamp = dyn_qvalue.timestamp;
+            callback(qvalue);
         } else {
-            const auto& value = *opt_value;
+            const auto& value = dyn_qvalue.value;
             if (std::holds_alternative<T>(value)) {
-                callback(std::optional<T>(std::get<T>(value)));
+                callback(vss::types::QualifiedValue<T>{std::get<T>(value), dyn_qvalue.quality, dyn_qvalue.timestamp});
             } else {
                 LOG(WARNING) << "Type mismatch in subscription callback for " << path
-                            << " - expected type index " << Value(T{}).index()
+                            << " - expected type index " << vss::types::Value(T{}).index()
                             << ", got " << value.index();
             }
         }

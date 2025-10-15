@@ -41,6 +41,19 @@ endif()
 
 find_package(yaml-cpp REQUIRED)
 
+# Find or fetch libvss-types
+find_package(vss-types QUIET)
+if(NOT vss-types_FOUND)
+    message(STATUS "vss-types not found, will fetch from GitHub")
+    include(FetchContent)
+    FetchContent_Declare(
+        vss-types
+        GIT_REPOSITORY https://github.com/tr-sdv-sandbox/libvss-types.git
+        GIT_TAG v0.0.1
+    )
+    FetchContent_MakeAvailable(vss-types)
+endif()
+
 # ============================================================================
 # State Machine Library
 # ============================================================================
@@ -147,6 +160,7 @@ target_link_libraries(kuksa_cpp
         protobuf::libprotobuf
         Threads::Threads
         glog::glog
+        vss::types
 )
 
 install(TARGETS kuksa_cpp

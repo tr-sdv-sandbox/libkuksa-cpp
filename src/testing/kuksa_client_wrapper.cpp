@@ -41,25 +41,25 @@ void KuksaClientWrapper::disconnect() {
     handle_cache_.clear();
 }
 
-kuksa::Value KuksaClientWrapper::test_value_to_value(const TestValue& test_value) {
-    return std::visit([](auto&& v) -> kuksa::Value {
+vss::types::Value KuksaClientWrapper::test_value_to_value(const TestValue& test_value) {
+    return std::visit([](auto&& v) -> vss::types::Value {
         using T = std::decay_t<decltype(v)>;
 
         if constexpr (std::is_same_v<T, bool>) {
-            return kuksa::Value(v);
+            return vss::types::Value(v);
         }
         else if constexpr (std::is_same_v<T, int32_t>) {
-            return kuksa::Value(v);
+            return vss::types::Value(v);
         }
         else if constexpr (std::is_same_v<T, float>) {
-            return kuksa::Value(v);
+            return vss::types::Value(v);
         }
         else if constexpr (std::is_same_v<T, double>) {
             // Convert double to float for compatibility
-            return kuksa::Value(static_cast<float>(v));
+            return vss::types::Value(static_cast<float>(v));
         }
         else if constexpr (std::is_same_v<T, std::string>) {
-            return kuksa::Value(v);
+            return vss::types::Value(v);
         }
 
         // Should not reach here
@@ -67,7 +67,7 @@ kuksa::Value KuksaClientWrapper::test_value_to_value(const TestValue& test_value
     }, test_value);
 }
 
-std::optional<TestValue> KuksaClientWrapper::value_to_test_value(const kuksa::Value& value) {
+std::optional<TestValue> KuksaClientWrapper::value_to_test_value(const vss::types::Value& value) {
     return std::visit([](auto&& v) -> std::optional<TestValue> {
         using T = std::decay_t<decltype(v)>;
 
@@ -115,7 +115,7 @@ bool KuksaClientWrapper::inject(const std::string& path, const TestValue& value)
     }
 
     // Convert TestValue to Value
-    kuksa::Value vss_value = test_value_to_value(value);
+    vss::types::Value vss_value = test_value_to_value(value);
 
     // Resolve the signal (works for all types: sensors, attributes, actuators)
     auto handle_result = resolver_->get_dynamic(path);
@@ -130,7 +130,8 @@ bool KuksaClientWrapper::inject(const std::string& path, const TestValue& value)
 
     // Use unified set() - automatically routes to correct RPC based on signal class
     LOG(INFO) << "Injecting " << path << " via set() (auto-routes based on signal type)";
-    auto status = accessor_->set(**handle_result, vss_value);
+    vss::types::DynamicQualifiedValue qvalue{vss_value, vss::types::SignalQuality::VALID};
+    auto status = accessor_->set(**handle_result, qvalue);
     if (!status.ok()) {
         LOG(ERROR) << "Failed to set value: " << status;
         return false;
@@ -153,8 +154,8 @@ std::optional<TestValue> KuksaClientWrapper::get(const std::string& path) {
             LOG(WARNING) << "Failed to get value: " << value_result.status();
             return std::nullopt;
         }
-        if (value_result->has_value()) {
-            return value_to_test_value(**value_result);
+        if (value_result->is_valid()) {
+            return value_to_test_value(value_result->value);
         }
         return std::nullopt;
     }
@@ -176,8 +177,8 @@ std::optional<TestValue> KuksaClientWrapper::get(const std::string& path) {
         LOG(WARNING) << "Failed to get value: " << value_result.status();
         return std::nullopt;
     }
-    if (value_result->has_value()) {
-        return value_to_test_value(**value_result);
+    if (value_result->is_valid()) {
+        return value_to_test_value(value_result->value);
     }
     return std::nullopt;
 }

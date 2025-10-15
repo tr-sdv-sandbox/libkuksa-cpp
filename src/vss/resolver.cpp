@@ -29,7 +29,7 @@ namespace kuksa {
 
 struct SignalMetadata {
     int32_t id;
-    std::optional<ValueType> type;
+    vss::types::ValueType type;  // UNSPECIFIED serves as sentinel value
     SignalClass signal_class;
 };
 
@@ -64,7 +64,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
 
         if (!connected_) {
-            return {-1, std::nullopt, SignalClass::UNKNOWN};
+            return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
         }
 
         ClientContext context;
@@ -76,14 +76,14 @@ public:
 
         if (!grpc_status.ok()) {
             LOG(ERROR) << "Failed to query metadata for " << path << ": " << grpc_status.error_message();
-            return {-1, std::nullopt, SignalClass::UNKNOWN};
+            return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
         }
 
         // Find the matching metadata entry
         for (const auto& metadata : response.metadata()) {
             if (metadata.path() == path && metadata.id() != 0) {
                 // Convert protobuf DataType to ValueType
-                ValueType vtype = static_cast<ValueType>(metadata.data_type());
+                vss::types::ValueType vtype = static_cast<vss::types::ValueType>(metadata.data_type());
 
                 // Determine signal class from entry_type
                 SignalClass sclass = SignalClass::UNKNOWN;
@@ -107,7 +107,7 @@ public:
         }
 
         LOG(WARNING) << "No signal metadata found for " << path;
-        return {-1, std::nullopt, SignalClass::UNKNOWN};
+        return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
     }
 
     // Unified handle implementation (read and write)
@@ -119,11 +119,11 @@ public:
             return dynamic.status();
         }
 
-        ValueType expected_type = get_value_type<T>();
-        if (!are_types_compatible((*dynamic)->type(), expected_type)) {
+        vss::types::ValueType expected_type = vss::types::get_value_type<T>();
+        if (!vss::types::are_types_compatible((*dynamic)->type(), expected_type)) {
             return VSSError::TypeMismatch(path,
-                                         value_type_to_string(expected_type),
-                                         value_type_to_string((*dynamic)->type()));
+                                         vss::types::value_type_to_string(expected_type),
+                                         vss::types::value_type_to_string((*dynamic)->type()));
         }
 
         // Wrap cached handle in typed handle
@@ -149,13 +149,13 @@ public:
         // Not cached - query metadata
         LOG(INFO) << "Cache miss - querying metadata for " << path;
         auto metadata = query_metadata_unlocked(path);
-        if (metadata.id < 0 || !metadata.type) {
+        if (metadata.id < 0 || metadata.type == vss::types::ValueType::UNSPECIFIED) {
             return VSSError::SignalNotFound(path);
         }
 
         // Create and cache handle
         auto handle = std::shared_ptr<DynamicSignalHandle>(
-            new DynamicSignalHandle(path, metadata.id, *metadata.type, metadata.signal_class)
+            new DynamicSignalHandle(path, metadata.id, metadata.type, metadata.signal_class)
         );
         handle_cache_[path] = handle;
 
@@ -166,7 +166,7 @@ public:
     // Query metadata without taking lock (caller must hold lock)
     SignalMetadata query_metadata_unlocked(const std::string& path) {
         if (!connected_) {
-            return {-1, std::nullopt, SignalClass::UNKNOWN};
+            return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
         }
 
         ClientContext context;
@@ -178,13 +178,13 @@ public:
 
         if (!grpc_status.ok()) {
             LOG(ERROR) << "Failed to query metadata for " << path << ": " << grpc_status.error_message();
-            return {-1, std::nullopt, SignalClass::UNKNOWN};
+            return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
         }
 
         // Find the matching metadata entry
         for (const auto& metadata : response.metadata()) {
             if (metadata.path() == path && metadata.id() != 0) {
-                ValueType vtype = static_cast<ValueType>(metadata.data_type());
+                vss::types::ValueType vtype = static_cast<vss::types::ValueType>(metadata.data_type());
 
                 SignalClass sclass = SignalClass::UNKNOWN;
                 switch (metadata.entry_type()) {
@@ -207,7 +207,7 @@ public:
         }
 
         LOG(WARNING) << "No signal metadata found for " << path;
-        return {-1, std::nullopt, SignalClass::UNKNOWN};
+        return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
     }
 
 private:
