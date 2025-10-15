@@ -49,13 +49,17 @@ int main(int argc, char** argv) {
     auto door_lock_handle = *door_lock_result;
 
     // Register actuator with the handle
-    client->serve_actuator(door_lock_handle, [](bool target, const SignalHandle<bool>& handle) {
+    auto serve_status = client->serve_actuator(door_lock_handle, [](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Actuation request for " << handle.path() << ": " << target;
 
         // In real code: queue to state machine/hardware controller
         // Don't block here - this runs on gRPC thread!
         // Handle is available if needed (e.g., for logging, type info)
     });
+    if (!serve_status.ok()) {
+        LOG(ERROR) << "Failed to register actuator: " << serve_status;
+        return 1;
+    }
 
     // ========================================================================
     // 2. Subscribe to a signal
@@ -76,7 +80,11 @@ int main(int argc, char** argv) {
     // ========================================================================
     // 3. Start and wait for ready
     // ========================================================================
-    client->start();
+    auto start_status = client->start();
+    if (!start_status.ok()) {
+        LOG(ERROR) << "Failed to start client: " << start_status;
+        return 1;
+    }
 
     auto ready_status = client->wait_until_ready(5000ms);
     if (!ready_status.ok()) {
@@ -102,15 +110,23 @@ int main(int argc, char** argv) {
         auto speed_rw_handle = *speed_rw_result;
 
         // Single publish (handles are values, not pointers)
-        client->publish(rpm_handle, uint32_t(3000));
-        LOG(INFO) << "  Published RPM: 3000";
+        auto rpm_status = client->publish(rpm_handle, uint32_t(3000));
+        if (rpm_status.ok()) {
+            LOG(INFO) << "  Published RPM: 3000";
+        } else {
+            LOG(ERROR) << "  Failed to publish RPM: " << rpm_status;
+        }
 
-        client->publish(temp_handle, 22.5f);
-        LOG(INFO) << "  Published Temperature: 22.5°C";
+        auto temp_status = client->publish(temp_handle, 22.5f);
+        if (temp_status.ok()) {
+            LOG(INFO) << "  Published Temperature: 22.5°C";
+        } else {
+            LOG(ERROR) << "  Failed to publish Temperature: " << temp_status;
+        }
 
         // Batch publish (efficient! - type-safe without explicit Value{})
         LOG(INFO) << "\nBatch publishing 3 sensor values:";
-        client->publish_batch(
+        auto batch_status = client->publish_batch(
             {
                 {rpm_handle, uint32_t(3500)},
                 {temp_handle, 23.0f},
@@ -126,6 +142,9 @@ int main(int argc, char** argv) {
                 }
             }
         );
+        if (!batch_status.ok()) {
+            LOG(ERROR) << "Batch publish failed: " << batch_status;
+        }
     }
 
     // ========================================================================

@@ -85,12 +85,14 @@ TEST_F(KuksaCommunicationTest, ProviderConnectivity) {
     // Create unified client with one actuator handler
     auto client = *Client::create(getKuksaAddress());
 
-    client->serve_actuator(actuator, [](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status = client->serve_actuator(actuator, [](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Dummy handler called with target: " << target;
     });
+    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
     EXPECT_FALSE(client->is_running()) << "Client should not be running before start()";
 
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
     EXPECT_TRUE(client->is_running()) << "Client should be running after start()";
 
     // Wait for client to be ready
@@ -124,15 +126,17 @@ TEST_F(KuksaCommunicationTest, ActuatorClientPattern) {
     // Create unified client with handler
     auto client = *Client::create(getKuksaAddress());
 
-    client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status = client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client received actuation for " << handle.path()
                   << " with value: " << target;
         actuation_value = target;
         actuation_received = true;
     });
+    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // Start client
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
 
     // Wait for client to be ready
     auto ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -223,7 +227,8 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
     });
 
     // Start subscriptions
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
 
     // Wait for client to be ready
     auto ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -313,7 +318,8 @@ TEST_F(KuksaCommunicationTest, MultipleSubscriptions) {
         }
     });
 
-    subscriber->start();
+    auto start_status = subscriber->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
 
     // Wait for subscriber to be ready
     auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
@@ -349,7 +355,7 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
     auto client = *Client::create(getKuksaAddress());
     Client* client_ptr = client.get();
 
-    client->serve_actuator(actuator_handle, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status2 = client->serve_actuator(actuator_handle, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client simulating hardware delay";
         std::this_thread::sleep_for(200ms);
 
@@ -363,8 +369,10 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
 
         actuation_promise.set_value();
     });
+    ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
-    client->start();
+    auto serve_status = client->start();
+    ASSERT_TRUE(serve_status.ok()) << "Failed to start client: " << serve_status;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -393,7 +401,8 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
         }
     });
 
-    subscriber->start();
+    auto start_status = subscriber->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
 
     // Wait for subscriber to be ready
     auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
@@ -457,7 +466,8 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
         }
     });
 
-    subscriber->start();
+    auto start_status = subscriber->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
 
     // Wait for subscriber to be ready
     auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
@@ -476,15 +486,17 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     auto client = *Client::create(getKuksaAddress());
     Client* client_ptr = client.get();
 
-    client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status3 = client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         int count = actuation_count.fetch_add(1) + 1;
         LOG(INFO) << "Client1 received actuation #" << count << " with value: " << target;
 
         auto status = client_ptr->publish(handle, target);
         LOG(INFO) << "Client1 published actual value: " << target << ", status: " << status;
     });
+    ASSERT_TRUE(serve_status3.ok()) << "Failed to register actuator: " << serve_status3;
 
-    client->start();
+    auto start_status2 = client->start();
+    ASSERT_TRUE(start_status2.ok()) << "Failed to start client: " << start_status2;
     LOG(INFO) << "Client1 started";
 
     // Wait for client to be ready
@@ -551,15 +563,17 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     auto client2 = *Client::create(getKuksaAddress());
     Client* client2_ptr = client2.get();
 
-    client2->serve_actuator(actuator_rw, [&, client2_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto serve_status4 = client2->serve_actuator(actuator_rw, [&, client2_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         int count = actuation_count2.fetch_add(1) + 1;
         LOG(INFO) << "Client2 received actuation #" << count << " with value: " << target;
 
         auto status = client2_ptr->publish(handle, target);
         LOG(INFO) << "Client2 published actual value: " << target << ", status: " << status;
     });
+    ASSERT_TRUE(serve_status4.ok()) << "Failed to register actuator: " << serve_status4;
 
-    client2->start();
+    auto start_status3 = client2->start();
+    ASSERT_TRUE(start_status3.ok()) << "Failed to start client2: " << start_status3;
     LOG(INFO) << "Client2 started";
 
     // Wait for client to be ready
@@ -702,7 +716,8 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
     // Wait a bit before starting subscriber to ensure initial value is in KUKSA
     std::this_thread::sleep_for(100ms);
 
-    subscriber->start();
+    auto start_status4 = subscriber->start();
+    ASSERT_TRUE(start_status4.ok()) << "Failed to start subscriber: " << start_status4;
 
     // Wait for subscriber to be ready
     auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));

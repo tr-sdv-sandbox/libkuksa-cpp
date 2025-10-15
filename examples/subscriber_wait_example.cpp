@@ -49,7 +49,11 @@ int main(int argc, char* argv[]) {
 
         // Start subscriber
         LOG(INFO) << "Starting subscriber...";
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            LOG(ERROR) << "Failed to start subscriber: " << start_status;
+            return 1;
+        }
 
         // Wait for it to be ready (with 5 second timeout)
         LOG(INFO) << "Waiting for subscriber to be ready (timeout: 5s)...";
@@ -91,7 +95,11 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            LOG(ERROR) << "Failed to start subscriber: " << start_status;
+            return 1;
+        }
 
         // Don't wait - just check status periodically
         LOG(INFO) << "Starting subscriber (non-blocking)";
@@ -124,7 +132,11 @@ int main(int argc, char* argv[]) {
 
         subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {});
 
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            LOG(ERROR) << "Failed to start subscriber: " << start_status;
+            return 1;
+        }
 
         // This should timeout
         LOG(INFO) << "Waiting for connection to invalid address (1s timeout)...";

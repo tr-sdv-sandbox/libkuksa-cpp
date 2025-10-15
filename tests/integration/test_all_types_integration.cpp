@@ -71,7 +71,10 @@ protected:
             }
         });
 
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            return false;
+        }
 
         // Wait for subscriber to be ready
         if (!subscriber->wait_until_ready(std::chrono::milliseconds(5000)).ok()) {
@@ -133,7 +136,10 @@ protected:
             }
         });
 
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            return false;
+        }
 
         // Wait for subscriber to be ready
         if (!subscriber->wait_until_ready(std::chrono::milliseconds(5000)).ok()) {
@@ -190,7 +196,10 @@ protected:
             }
         });
 
-        subscriber->start();
+        auto start_status = subscriber->start();
+        if (!start_status.ok()) {
+            return false;
+        }
 
         // Wait for subscriber to be ready
         if (!subscriber->wait_until_ready(std::chrono::milliseconds(5000)).ok()) {
@@ -207,7 +216,7 @@ protected:
         auto client = *Client::create(getKuksaAddress());
         client_ptr = client.get();
 
-        client->serve_actuator(actuator_rw_handle, [&, client_ptr](T target, const SignalHandle<T>& handle) {
+        auto serve_status = client->serve_actuator(actuator_rw_handle, [&, client_ptr](T target, const SignalHandle<T>& handle) {
             target_value = target;
             target_received = true;
 
@@ -217,8 +226,14 @@ protected:
                 LOG(ERROR) << "Failed to publish actual: " << status;
             }
         });
+        if (!serve_status.ok()) {
+            return false;
+        }
 
-        client->start();
+        auto client_start_status = client->start();
+        if (!client_start_status.ok()) {
+            return false;
+        }
 
         // Wait for client to be ready
         auto ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));

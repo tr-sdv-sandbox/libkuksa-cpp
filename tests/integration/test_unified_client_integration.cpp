@@ -62,7 +62,7 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
     std::atomic<bool> actuator_called{false};
     std::atomic<bool> last_target{false};
 
-    client->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
+    auto serve_status = client->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Actuator callback: target=" << target;
         last_target = target;
         actuator_called = true;
@@ -70,6 +70,7 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
         // NOTE: Don't call publish from inside the callback - it runs on gRPC thread
         // In real code, queue to a state machine thread that will publish later
     });
+    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // 2. Subscribe to a sensor
     auto temp_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
@@ -93,7 +94,8 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
     auto temp_rw = *temp_rw_result;
 
     // 4. Start client
-    client->start();
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
     auto ready_status = client->wait_until_ready(5000ms);
     ASSERT_TRUE(ready_status.ok()) << "Client not ready: " << ready_status;
 
@@ -168,7 +170,8 @@ TEST_F(UnifiedClientIntegrationTest, BatchPublishing) {
         }
     });
 
-    subscriber->start();
+    auto sub_start_status = subscriber->start();
+    ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
     ASSERT_TRUE(subscriber->wait_until_ready(5000ms).ok());
 
     // Publisher publishes sensors (no registration needed!)
@@ -179,7 +182,8 @@ TEST_F(UnifiedClientIntegrationTest, BatchPublishing) {
     auto speed_rw = *speed_rw_result;
     auto rpm_rw = *rpm_rw_result;
 
-    publisher->start();
+    auto pub_start_status = publisher->start();
+    ASSERT_TRUE(pub_start_status.ok()) << "Failed to start publisher: " << pub_start_status;
     ASSERT_TRUE(publisher->wait_until_ready(5000ms).ok());
 
     std::this_thread::sleep_for(100ms);
@@ -253,15 +257,17 @@ TEST_F(UnifiedClientIntegrationTest, ProviderRestartResilience) {
     auto create_client = [&]() {
         auto client = *Client::create(getKuksaAddress());
 
-        client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+        auto serve_status = client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
             LOG(INFO) << "Actuator called with: " << target;
             last_value = target;
             actuator_call_count++;
 
             // NOTE: Don't publish from callback - runs on gRPC thread
         });
+        EXPECT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
-        client->start();
+        auto start_status = client->start();
+        EXPECT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
         auto ready = client->wait_until_ready(5000ms);
         EXPECT_TRUE(ready.ok()) << "Client not ready: " << ready;
 
@@ -343,15 +349,17 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
     });
 
     // Serve HVAC actuator
-    hvac_controller->serve_actuator(hvac_actuator, [&](bool cooling_target, const SignalHandle<bool>& handle) {
+    auto hvac_serve_status = hvac_controller->serve_actuator(hvac_actuator, [&](bool cooling_target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "HVAC: Received cooling command: " << cooling_target;
         hvac_cooling_actual = cooling_target;
 
         // NOTE: Don't publish from callback - runs on gRPC thread
         // In real code, queue to state machine
     });
+    ASSERT_TRUE(hvac_serve_status.ok()) << "Failed to register HVAC actuator: " << hvac_serve_status;
 
-    hvac_controller->start();
+    auto hvac_start_status = hvac_controller->start();
+    ASSERT_TRUE(hvac_start_status.ok()) << "Failed to start HVAC controller: " << hvac_start_status;
     ASSERT_TRUE(hvac_controller->wait_until_ready(5000ms).ok());
     std::this_thread::sleep_for(100ms);
 
@@ -382,7 +390,8 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
         }
     });
 
-    temp_monitor->start();
+    auto monitor_start_status = temp_monitor->start();
+    ASSERT_TRUE(monitor_start_status.ok()) << "Failed to start temp monitor: " << monitor_start_status;
     ASSERT_TRUE(temp_monitor->wait_until_ready(5000ms).ok());
     std::this_thread::sleep_for(100ms);
 
@@ -440,10 +449,11 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
 
     std::atomic<int> actuation_count{0};
 
-    actuator_client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+    auto act_serve_status = actuator_client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
         actuation_count++;
         // NOTE: Don't publish from callback
     });
+    ASSERT_TRUE(act_serve_status.ok()) << "Failed to register actuator: " << act_serve_status;
 
     // Actuator client subscribes to sensor
     auto sensor_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
@@ -458,7 +468,8 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
         }
     });
 
-    actuator_client->start();
+    auto act_start_status = actuator_client->start();
+    ASSERT_TRUE(act_start_status.ok()) << "Failed to start actuator client: " << act_start_status;
     ASSERT_TRUE(actuator_client->wait_until_ready(5000ms).ok());
 
     // Publisher client publishes sensor (no registration needed!)
@@ -466,7 +477,8 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
     ASSERT_TRUE(sensor_rw_result.ok());
     auto sensor_rw = *sensor_rw_result;
 
-    publisher_client->start();
+    auto pub_start_status2 = publisher_client->start();
+    ASSERT_TRUE(pub_start_status2.ok()) << "Failed to start publisher client: " << pub_start_status2;
     ASSERT_TRUE(publisher_client->wait_until_ready(5000ms).ok());
     std::this_thread::sleep_for(100ms);
 
@@ -504,9 +516,12 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
     // Thread 3: Batch publish
     std::thread batch_publisher([&]() {
         for (int i = 0; i < NUM_ITERATIONS / 2 && running; ++i) {
-            publisher_client->publish_batch({
+            auto batch_status = publisher_client->publish_batch({
                 {sensor_rw, static_cast<float>(i * 100)}
             });
+            if (!batch_status.ok()) {
+                LOG(WARNING) << "Batch publish failed: " << batch_status;
+            }
             std::this_thread::sleep_for(100ms);
         }
     });
@@ -570,7 +585,7 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
     std::atomic<bool> worker_running{true};
 
     // Register actuator callback (runs on gRPC thread)
-    door_controller->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
+    auto door_serve_status = door_controller->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Door controller: Received lock command: " << target;
 
         // Queue work instead of publishing directly
@@ -578,8 +593,10 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
         work_queue.push({handle, target});
         work_cv.notify_one();
     });
+    ASSERT_TRUE(door_serve_status.ok()) << "Failed to register door actuator: " << door_serve_status;
 
-    door_controller->start();
+    auto door_start_status = door_controller->start();
+    ASSERT_TRUE(door_start_status.ok()) << "Failed to start door controller: " << door_start_status;
     ASSERT_TRUE(door_controller->wait_until_ready(5000ms).ok());
 
     // Worker thread that processes actuation requests and publishes actual values
@@ -624,7 +641,8 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
         }
     });
 
-    observer->start();
+    auto observer_start_status = observer->start();
+    ASSERT_TRUE(observer_start_status.ok()) << "Failed to start observer: " << observer_start_status;
     ASSERT_TRUE(observer->wait_until_ready(5000ms).ok());
     std::this_thread::sleep_for(100ms);
 
