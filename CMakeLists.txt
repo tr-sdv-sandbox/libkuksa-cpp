@@ -42,7 +42,7 @@ endif()
 find_package(yaml-cpp REQUIRED)
 
 # Find or fetch libvss-types
-if(NOT TARGET vss-types)
+if(NOT TARGET vss::types)
     find_package(vss-types QUIET)
     if(NOT vss-types_FOUND)
         message(STATUS "vss-types not found, will fetch from GitHub")
