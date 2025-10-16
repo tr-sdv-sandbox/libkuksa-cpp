@@ -237,6 +237,11 @@ public:
         if (running_) {
             stop();
         }
+
+        // Clean up gRPC resources even if client was never started
+        // This is important for clients used only for synchronous operations
+        stub_.reset();
+        channel_.reset();
     }
 
     void initialize_connection() {
