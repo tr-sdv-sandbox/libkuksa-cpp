@@ -71,11 +71,15 @@ int main(int argc, char** argv) {
     }
     auto speed = *speed_result;
 
-    client->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status = client->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Speed update: " << *qvalue.value << " km/h";
         }
     });
+    if (!subscribe_status.ok()) {
+        LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
+        return 1;
+    }
 
     // ========================================================================
     // 3. Start and wait for ready

@@ -79,13 +79,14 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, TypedAPI) {
     ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // Subscribe to monitor actual values (same client!)
-    client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status = client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Client received actual: " << *qvalue.value;
             actual_received = *qvalue.value;
             actual_count++;
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto start_status = client->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
@@ -182,13 +183,14 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, DynamicAPI) {
     ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
     // Subscribe to monitor actual values
-    client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status = client->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Client received: " << *qvalue.value;
             actual_received = *qvalue.value;
             actual_count++;
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     // Start AFTER adding handlers and subscriptions
     auto start_status2 = client->start();
@@ -293,19 +295,21 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, MixedTypedAndDynamicAPI) {
     ASSERT_TRUE(serve_status4.ok()) << "Failed to register dynamic actuator: " << serve_status4;
 
     // Subscribe to both actuators
-    client->subscribe(uint_actuator, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
+    auto subscribe_status1 = client->subscribe(uint_actuator, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Uint subscription received: " << *qvalue.value;
             uint_actual = *qvalue.value;
         }
     });
+    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to uint actuator: " << subscribe_status1;
 
-    client->subscribe(float_actuator, [&](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status2 = client->subscribe(float_actuator, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Float subscription received: " << *qvalue.value;
             float_actual = *qvalue.value;
         }
     });
+    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to float actuator: " << subscribe_status2;
 
     auto start_status3 = client->start();
     ASSERT_TRUE(start_status3.ok()) << "Failed to start client: " << start_status3;
@@ -472,7 +476,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ArrayTypes) {
     ASSERT_TRUE(serve_status6.ok()) << "Failed to register actuator: " << serve_status6;
 
     // Subscribe to monitor actual values
-    client->subscribe(actuator, [&](vss::types::QualifiedValue<std::vector<int32_t>> qvalue) {
+    auto subscribe_status = client->subscribe(actuator, [&](vss::types::QualifiedValue<std::vector<int32_t>> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscription received array with " << qvalue.value->size() << " elements";
             std::lock_guard<std::mutex> lock(array_mutex);
@@ -480,6 +484,7 @@ TEST_F(ActuatorOwnerHandleIntegrationTest, ArrayTypes) {
             received = true;
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto start_status5 = client->start();
     ASSERT_TRUE(start_status5.ok()) << "Failed to start client: " << start_status5;

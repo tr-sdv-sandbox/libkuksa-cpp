@@ -214,7 +214,7 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
     std::atomic<int> update_count(0);
     std::atomic<float> received_value(0);
 
-    client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status = client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         LOG(INFO) << "Subscription received update: "
                   << (qvalue.is_valid() ? std::to_string(*qvalue.value) : "NOT_VALID")
                   << " (count: " << update_count.load() + 1 << ")";
@@ -225,6 +225,7 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
             LOG(INFO) << "Skipping invalid value";
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     // Start subscriptions
     auto start_status = client->start();
@@ -297,26 +298,29 @@ TEST_F(KuksaCommunicationTest, MultipleSubscriptions) {
     // Set up multiple subscriptions
     std::atomic<int> updates_received(0);
 
-    subscriber->subscribe(sensor1, [&](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status1 = subscriber->subscribe(sensor1, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor1 update: " << *qvalue.value;
             updates_received++;
         }
     });
+    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to sensor1: " << subscribe_status1;
 
-    subscriber->subscribe(sensor2, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status2 = subscriber->subscribe(sensor2, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor2 update: " << *qvalue.value;
             updates_received++;
         }
     });
+    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to sensor2: " << subscribe_status2;
 
-    subscriber->subscribe(sensor3, [&](vss::types::QualifiedValue<bool> qvalue) {
+    auto subscribe_status3 = subscriber->subscribe(sensor3, [&](vss::types::QualifiedValue<bool> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor3 update: " << *qvalue.value;
             updates_received++;
         }
     });
+    ASSERT_TRUE(subscribe_status3.ok()) << "Failed to subscribe to sensor3: " << subscribe_status3;
 
     auto start_status = subscriber->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
@@ -393,13 +397,14 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
     std::atomic<bool> actual_updated(false);
     std::atomic<int32_t> actual_value(0);
 
-    subscriber->subscribe(actuator_ro, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status = subscriber->subscribe(actuator_ro, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Actual value updated to: " << *qvalue.value;
             actual_value = *qvalue.value;
             actual_updated = true;
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto start_status = subscriber->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
@@ -455,7 +460,7 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     std::vector<int32_t> received_values;
     std::mutex values_mutex;
 
-    subscriber->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status = subscriber->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         int count = subscription_updates.fetch_add(1) + 1;
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscription callback #" << count << ": value = " << *qvalue.value;
@@ -465,6 +470,7 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
             LOG(INFO) << "Subscription callback #" << count << ": NOT_VALID";
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto start_status = subscriber->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
@@ -696,7 +702,7 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
     std::set<int32_t> unique_values_received;
     std::mutex values_mutex;
 
-    subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             int count = updates_received.fetch_add(1) + 1;
             LOG(INFO) << "Received update #" << count << ": " << *qvalue.value;
@@ -712,7 +718,8 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
             }
         }
     });
-    
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
+
     // Wait a bit before starting subscriber to ensure initial value is in KUKSA
     std::this_thread::sleep_for(100ms);
 

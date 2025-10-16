@@ -289,12 +289,13 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
     auto subscriber = *Client::create(getKuksaAddress());
 
     // Subscribe to temperature updates (using test sensor)
-    subscriber->subscribe(cabin_temp, [&state_machine](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status = subscriber->subscribe(cabin_temp, [&state_machine](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             // Non-blocking call - just posts event
             state_machine.on_temperature_update(*qvalue.value);
         }
     });
+    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto sub_start_status = subscriber->start();
     ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
@@ -403,24 +404,26 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     std::atomic<int32_t> sensor_updates_received(0);
     std::atomic<float> last_sensor_value(0.0f);
 
-    subscriber->subscribe(test_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    auto subscribe_status1 = subscriber->subscribe(test_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscriber received sensor update: " << *qvalue.value;
             last_sensor_value = *qvalue.value;
             sensor_updates_received++;
         }
     });
+    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to sensor: " << subscribe_status1;
 
     std::atomic<int32_t> actuator_updates_received(0);
     std::atomic<int32_t> last_actuator_value(0);
 
-    subscriber->subscribe(test_actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    auto subscribe_status2 = subscriber->subscribe(test_actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscriber received actuator feedback: " << *qvalue.value;
             last_actuator_value = *qvalue.value;
             actuator_updates_received++;
         }
     });
+    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to actuator: " << subscribe_status2;
 
     auto sub_start_status2 = subscriber->start();
     ASSERT_TRUE(sub_start_status2.ok()) << "Failed to start subscriber: " << sub_start_status2;

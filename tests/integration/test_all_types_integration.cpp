@@ -64,12 +64,16 @@ protected:
         T received_value{};
 
         // Subscribe
-        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+        auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 received_value = *qvalue.value;
                 received = true;
             }
         });
+        if (!subscribe_status.ok()) {
+            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
+            return false;
+        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -129,12 +133,16 @@ protected:
         T received_value{};
 
         // Subscribe
-        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+        auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 received_value = *qvalue.value;
                 received = true;
             }
         });
+        if (!subscribe_status.ok()) {
+            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
+            return false;
+        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -189,12 +197,16 @@ protected:
         std::atomic<bool> actual_received(false);
         T actual_value{};
 
-        subscriber->subscribe(actuator_handle, [&](vss::types::QualifiedValue<T> qvalue) {
+        auto subscribe_status = subscriber->subscribe(actuator_handle, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 actual_value = *qvalue.value;
                 actual_received = true;
             }
         });
+        if (!subscribe_status.ok()) {
+            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
+            return false;
+        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
