@@ -120,7 +120,7 @@ private:
             if (std::system(("docker ps -q -f name=" + std::string(CONTAINER_NAME) + " | grep -q .").c_str()) != 0) {
                 LOG(ERROR) << "Container stopped unexpectedly";
                 // Get logs for debugging
-                std::system(("docker logs " + std::string(CONTAINER_NAME) + " 2>&1 | tail -20").c_str());
+                [[maybe_unused]] int log_result = std::system(("docker logs " + std::string(CONTAINER_NAME) + " 2>&1 | tail -20").c_str());
                 return false;
             }
 
@@ -140,9 +140,9 @@ private:
 
     static void StopContainer() {
         LOG(INFO) << "Stopping KUKSA container...";
-        std::system(("docker stop " + std::string(CONTAINER_NAME) + " 2>/dev/null").c_str());
+        [[maybe_unused]] int stop_result = std::system(("docker stop " + std::string(CONTAINER_NAME) + " 2>/dev/null").c_str());
         // Force remove to ensure it's completely gone
-        std::system(("docker rm -f " + std::string(CONTAINER_NAME) + " 2>/dev/null").c_str());
+        [[maybe_unused]] int rm_result = std::system(("docker rm -f " + std::string(CONTAINER_NAME) + " 2>/dev/null").c_str());
         // Small delay to ensure Docker cleans up
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         container_started = false;
