@@ -238,8 +238,8 @@ public:
             stop();
         }
 
-        // Clean up gRPC resources even if client was never started
-        // This is important for clients used only for synchronous operations
+        // Clean up gRPC resources
+        // Release stub first, then channel - let smart pointers handle cleanup
         stub_.reset();
         channel_.reset();
     }
@@ -335,6 +335,9 @@ public:
         }
 
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         GetValueRequest request;
         request.mutable_signal_id()->set_id(signal_id);
 
@@ -381,6 +384,9 @@ public:
         using kuksa::val::v2::ActuateResponse;
 
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         ActuateRequest request;
         request.mutable_signal_id()->set_id(signal_id);
         *request.mutable_value() = to_proto_value(value);
@@ -409,6 +415,9 @@ public:
         }
 
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         PublishValueRequest request;
         auto* sig_id = request.mutable_signal_id();
         sig_id->set_id(signal_id);
@@ -827,6 +836,9 @@ private:
 
     std::optional<Datapoint> get_current_value(int32_t signal_id) {
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         GetValueRequest request;
         request.mutable_signal_id()->set_id(signal_id);
 
@@ -851,6 +863,9 @@ private:
 
     SignalMetadata query_signal_metadata(const std::string& path) {
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         ListMetadataRequest request;
         request.set_root(path);
 

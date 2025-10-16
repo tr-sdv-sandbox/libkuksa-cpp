@@ -43,6 +43,14 @@ public:
         LOG(INFO) << "Creating Resolver for " << address;
     }
 
+    ~VSSResolverImpl() override {
+        // Clean up gRPC resources in correct order
+        // 1. First release the stub (no more RPCs)
+        stub_.reset();
+        // 2. Then release the channel
+        channel_.reset();
+    }
+
     Status connect(int timeout_seconds) {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -68,6 +76,9 @@ public:
         }
 
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         ListMetadataRequest request;
         request.set_root(path);  // Query specific signal
 
@@ -170,6 +181,9 @@ public:
         }
 
         ClientContext context;
+        // Set a deadline to prevent hanging forever on slow/stuck RPCs
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
         ListMetadataRequest request;
         request.set_root(path);
 
