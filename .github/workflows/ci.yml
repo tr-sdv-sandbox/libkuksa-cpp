@@ -56,7 +56,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cd build
+          cd build/tests
           # Run unit tests directly (no Docker required)
           ./state_machine_tests --gtest_output=xml:state_machine_results.xml || true
           ./all_vss_types_tests --gtest_output=xml:vss_types_results.xml || true
