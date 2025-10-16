@@ -268,14 +268,19 @@ public:
     // Subscription
     // ========================================================================
 
-    void subscribe_impl(
+    Status subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback) override {
+
+        if (running_.load()) {
+            return absl::FailedPreconditionError("Cannot subscribe after client has started");
+        }
 
         LOG(INFO) << "Registering subscription to " << handle->path();
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
         subscriptions_[handle->id()] = callback;
         id_to_handle_[handle->id()] = handle;
+        return absl::OkStatus();
     }
 
     bool unsubscribe_impl(int32_t signal_id) override {

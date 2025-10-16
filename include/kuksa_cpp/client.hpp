@@ -440,14 +440,17 @@ public:
      *
      * @param signal Signal handle (obtained from Resolver)
      * @param callback Called when signal value changes or on initial value
+     * @return Status indicating success or failure (e.g., if called after start())
      */
     template<typename T>
-    void subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
+    Status subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
 
     /**
      * @brief Subscribe with dynamic handle
+     *
+     * @return Status indicating success or failure (e.g., if called after start())
      */
-    void subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
+    Status subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
 
     /**
      * @brief Unsubscribe from a signal
@@ -552,7 +555,7 @@ protected:
         std::function<void(const std::map<int32_t, Status>&)> callback
     ) = 0;
 
-    virtual void subscribe_impl(
+    virtual Status subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback
     ) = 0;
@@ -638,8 +641,8 @@ inline Status Client::set(const DynamicSignalHandle& signal, const vss::types::D
 
 // Subscription implementations
 template<typename T>
-void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
-    subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
+Status Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
+    return subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
         // Convert DynamicQualifiedValue to QualifiedValue<T>
         if (vss::types::is_empty(dyn_qvalue.value)) {
             vss::types::QualifiedValue<T> qvalue;
