@@ -10,6 +10,9 @@ option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_TESTS "Build tests" ON)
 option(WITH_TESTING "Build testing library" ON)
 
+# Installation directories (must be before any install() commands)
+include(GNUInstallDirs)
+
 # Find dependencies
 find_package(Threads REQUIRED)
 find_package(glog REQUIRED)
@@ -237,11 +240,8 @@ if(WITH_TESTING)
     )
 endif()
 
-
-# Installation
-include(GNUInstallDirs)
-
-    install(TARGETS sdv_state_machine
+# Install state machine library
+install(TARGETS sdv_state_machine
         EXPORT sdv_state_machine-targets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
