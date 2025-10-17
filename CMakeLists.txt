@@ -150,6 +150,9 @@ set(VSS_SOURCES
 add_library(kuksa_cpp ${VSS_SOURCES})
 add_library(kuksa ALIAS kuksa_cpp)
 
+# Set the export name to create kuksa::cpp target
+set_target_properties(kuksa_cpp PROPERTIES EXPORT_NAME cpp)
+
 target_include_directories(kuksa_cpp
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -177,7 +180,7 @@ install(TARGETS kuksa_cpp
 
 install(EXPORT kuksa_cpp-targets
     FILE kuksa_cpp-config.cmake
-#    NAMESPACE sdv::
+    NAMESPACE kuksa::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kuksa_cpp
 )
 
