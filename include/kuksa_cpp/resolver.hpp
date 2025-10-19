@@ -9,6 +9,7 @@
 #include <memory>
 #include <kuksa_cpp/types.hpp>
 #include <kuksa_cpp/error.hpp>
+#include <kuksa_cpp/signal_set.hpp>
 
 namespace kuksa {
 
@@ -110,8 +111,67 @@ public:
      */
     Result<std::shared_ptr<DynamicSignalHandle>> get_dynamic(const std::string& path);
 
+    // ========================================================================
+    // BATCH RESOLUTION (Fluent API)
+    // ========================================================================
+
+    /**
+     * @brief Create a batch signal resolution builder
+     *
+     * Returns a builder for resolving multiple signals at once with automatic
+     * error aggregation. This eliminates the verbose error handling boilerplate
+     * when resolving many signals.
+     *
+     * @return SignalSetBuilder for chaining add() calls
+     *
+     * Example:
+     * @code
+     * kuksa::SignalHandle<float> battery_voltage;
+     * kuksa::SignalHandle<float> fuel_level;
+     * kuksa::SignalHandle<bool> hvac_active;
+     *
+     * auto status = resolver->signals()
+     *     .add(battery_voltage, "Vehicle.LowVoltageBattery.CurrentVoltage")
+     *     .add(fuel_level, "Vehicle.OBD.FuelLevel")
+     *     .add(hvac_active, "Vehicle.Cabin.HVAC.IsAirConditioningActive")
+     *     .resolve();
+     *
+     * if (!status.ok()) {
+     *     LOG(ERROR) << "Failed to resolve signals:\n" << status;
+     *     return false;
+     * }
+     *
+     * // All handles are now populated and ready to use!
+     * @endcode
+     */
+    SignalSetBuilder signals() {
+        return SignalSetBuilder(this);
+    }
+
 protected:
     Resolver() = default;
 };
+
+// ============================================================================
+// SignalSetBuilder Template Implementation
+// ============================================================================
+
+// Implementation of SignalSetBuilder::add() - must come after Resolver definition
+template<typename T>
+SignalSetBuilder& SignalSetBuilder::add(SignalHandle<T>& handle, const std::string& path) {
+    // Create a resolver lambda that captures the handle reference and path
+    signal_specs_.push_back({
+        .path = path,
+        .resolver = [this, &handle, path]() -> absl::Status {
+            auto result = resolver_->template get<T>(path);
+            if (!result.ok()) {
+                return result.status();
+            }
+            handle = *result;  // Assign directly to user's handle
+            return absl::OkStatus();
+        }
+    });
+    return *this;
+}
 
 } // namespace kuksa

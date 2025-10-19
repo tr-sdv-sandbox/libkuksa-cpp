@@ -257,6 +257,10 @@ Result<std::unique_ptr<Resolver>> Resolver::create(
 
 // Typed handles (scalar types)
 template Result<SignalHandle<bool>> Resolver::get<bool>(const std::string&);
+template Result<SignalHandle<int8_t>> Resolver::get<int8_t>(const std::string&);
+template Result<SignalHandle<uint8_t>> Resolver::get<uint8_t>(const std::string&);
+template Result<SignalHandle<int16_t>> Resolver::get<int16_t>(const std::string&);
+template Result<SignalHandle<uint16_t>> Resolver::get<uint16_t>(const std::string&);
 template Result<SignalHandle<int32_t>> Resolver::get<int32_t>(const std::string&);
 template Result<SignalHandle<uint32_t>> Resolver::get<uint32_t>(const std::string&);
 template Result<SignalHandle<int64_t>> Resolver::get<int64_t>(const std::string&);
@@ -267,6 +271,10 @@ template Result<SignalHandle<std::string>> Resolver::get<std::string>(const std:
 
 // Typed handles (array types)
 template Result<SignalHandle<std::vector<bool>>> Resolver::get<std::vector<bool>>(const std::string&);
+template Result<SignalHandle<std::vector<int8_t>>> Resolver::get<std::vector<int8_t>>(const std::string&);
+template Result<SignalHandle<std::vector<uint8_t>>> Resolver::get<std::vector<uint8_t>>(const std::string&);
+template Result<SignalHandle<std::vector<int16_t>>> Resolver::get<std::vector<int16_t>>(const std::string&);
+template Result<SignalHandle<std::vector<uint16_t>>> Resolver::get<std::vector<uint16_t>>(const std::string&);
 template Result<SignalHandle<std::vector<int32_t>>> Resolver::get<std::vector<int32_t>>(const std::string&);
 template Result<SignalHandle<std::vector<uint32_t>>> Resolver::get<std::vector<uint32_t>>(const std::string&);
 template Result<SignalHandle<std::vector<int64_t>>> Resolver::get<std::vector<int64_t>>(const std::string&);

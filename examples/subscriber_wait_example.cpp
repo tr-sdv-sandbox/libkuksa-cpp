@@ -41,15 +41,11 @@ int main(int argc, char* argv[]) {
         }
         auto speed = *speed_result;
 
-        auto subscribe_status = subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
             if (qvalue.is_valid()) {
                 LOG(INFO) << "Speed: " << *qvalue.value << " km/h";
             }
         });
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return 1;
-        }
 
         // Start subscriber
         LOG(INFO) << "Starting subscriber...";
@@ -93,15 +89,11 @@ int main(int argc, char* argv[]) {
         auto speed_result = (*resolver)->get<float>("Vehicle.Speed");
         auto speed = *speed_result;
 
-        auto subscribe_status = subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
             if (qvalue.is_valid()) {
                 LOG(INFO) << "Speed: " << *qvalue.value << " km/h";
             }
         });
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return 1;
-        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -138,11 +130,7 @@ int main(int argc, char* argv[]) {
         auto speed_result = (*resolver)->get<float>("Vehicle.Speed");
         auto speed = *speed_result;
 
-        auto subscribe_status = subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {});
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return 1;
-        }
+        subscriber->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {});
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {

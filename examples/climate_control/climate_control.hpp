@@ -92,8 +92,7 @@ private:
     kuksa::SignalHandle<float> cabin_temp_;                // Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature
 
     // VSS 5.1 Signal handles (outputs - protection actions)
-    // NOTE: VSS specifies uint8 for Window.Position, but KUKSA uses uint32 (see TYPE_SYSTEM_ANALYSIS.md)
-    kuksa::SignalHandle<uint32_t> window_position_;        // Vehicle.Cabin.Door.Row1.DriverSide.Window.Position
+    kuksa::SignalHandle<uint8_t> window_position_;         // Vehicle.Cabin.Door.Row1.DriverSide.Window.Position (VSS 5.1: uint8)
     kuksa::SignalHandle<std::string> sunroof_switch_;      // Vehicle.Cabin.Sunroof.Switch
 
     // Custom signals (vss_extensions.json)

@@ -57,61 +57,29 @@ bool ClimateProtectionSystem::connect() {
     resolver_ = std::move(*resolver_result);
     LOG(INFO) << "Resolver created successfully";
 
-    // Resolve VSS 5.1 signal handles (monitoring inputs)
-    auto battery_voltage_result = resolver_->get<float>("Vehicle.LowVoltageBattery.CurrentVoltage");
-    auto fuel_level_result = resolver_->get<float>("Vehicle.OBD.FuelLevel");
-    auto hvac_is_active_result = resolver_->get<bool>("Vehicle.Cabin.HVAC.IsAirConditioningActive");
-    auto engine_is_running_result = resolver_->get<bool>("Vehicle.Powertrain.CombustionEngine.IsRunning");
-    auto coolant_temp_result = resolver_->get<float>("Vehicle.OBD.CoolantTemperature");
-    auto ambient_temp_result = resolver_->get<float>("Vehicle.Cabin.HVAC.AmbientAirTemperature");
-    auto cabin_temp_result = resolver_->get<float>("Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature");
+    // Batch resolve all signal handles using fluent API
+    auto status = resolver_->signals()
+        // Monitoring inputs (VSS 5.1)
+        .add(battery_voltage_, "Vehicle.LowVoltageBattery.CurrentVoltage")
+        .add(fuel_level_, "Vehicle.OBD.FuelLevel")
+        .add(hvac_is_active_, "Vehicle.Cabin.HVAC.IsAirConditioningActive")
+        .add(engine_is_running_, "Vehicle.Powertrain.CombustionEngine.IsRunning")
+        .add(coolant_temp_, "Vehicle.OBD.CoolantTemperature")
+        .add(ambient_temp_, "Vehicle.Cabin.HVAC.AmbientAirTemperature")
+        .add(cabin_temp_, "Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature")
+        // Protection action outputs (VSS 5.1)
+        .add(window_position_, "Vehicle.Cabin.Door.Row1.DriverSide.Window.Position")  // uint8 with transparent type mapping!
+        .add(sunroof_switch_, "Vehicle.Cabin.Sunroof.Switch")
+        // Custom signals (vss_extensions.json)
+        .add(engine_start_stationary_, "Vehicle.Private.Engine.IsStartWithoutIntentionToDrive")
+        .add(min_battery_voltage_, "Vehicle.Private.HVAC.MinimumBatteryVoltageForHVAC")
+        .add(min_fuel_level_, "Vehicle.Private.HVAC.MinimumFuelLevelForHVAC")
+        .resolve();
 
-    // Resolve VSS 5.1 signal handles (protection action outputs)
-    // NOTE: VSS specifies uint8, but using uint32 due to KUKSA protobuf limitation (see TYPE_SYSTEM_ANALYSIS.md)
-    auto window_position_result = resolver_->get<uint32_t>("Vehicle.Cabin.Door.Row1.DriverSide.Window.Position");
-    auto sunroof_switch_result = resolver_->get<std::string>("Vehicle.Cabin.Sunroof.Switch");
-
-    // Resolve custom signal handles (vss_extensions.json)
-    auto engine_start_stationary_result = resolver_->get<bool>("Vehicle.Private.Engine.IsStartWithoutIntentionToDrive");
-    auto min_battery_voltage_result = resolver_->get<float>("Vehicle.Private.HVAC.MinimumBatteryVoltageForHVAC");
-    auto min_fuel_level_result = resolver_->get<float>("Vehicle.Private.HVAC.MinimumFuelLevelForHVAC");
-
-    // Check if all signals resolved successfully
-    if (!battery_voltage_result.ok() || !fuel_level_result.ok() ||
-        !hvac_is_active_result.ok() || !engine_is_running_result.ok() ||
-        !coolant_temp_result.ok() || !ambient_temp_result.ok() ||
-        !cabin_temp_result.ok() || !window_position_result.ok() ||
-        !sunroof_switch_result.ok() || !engine_start_stationary_result.ok() ||
-        !min_battery_voltage_result.ok() || !min_fuel_level_result.ok()) {
-        LOG(ERROR) << "Failed to resolve signal handles:";
-        if (!battery_voltage_result.ok()) LOG(ERROR) << "  BatteryVoltage: " << battery_voltage_result.status();
-        if (!fuel_level_result.ok()) LOG(ERROR) << "  FuelLevel: " << fuel_level_result.status();
-        if (!hvac_is_active_result.ok()) LOG(ERROR) << "  HVACIsActive: " << hvac_is_active_result.status();
-        if (!engine_is_running_result.ok()) LOG(ERROR) << "  EngineIsRunning: " << engine_is_running_result.status();
-        if (!coolant_temp_result.ok()) LOG(ERROR) << "  CoolantTemp: " << coolant_temp_result.status();
-        if (!ambient_temp_result.ok()) LOG(ERROR) << "  AmbientTemp: " << ambient_temp_result.status();
-        if (!cabin_temp_result.ok()) LOG(ERROR) << "  CabinTemp: " << cabin_temp_result.status();
-        if (!window_position_result.ok()) LOG(ERROR) << "  WindowPosition: " << window_position_result.status();
-        if (!sunroof_switch_result.ok()) LOG(ERROR) << "  SunroofSwitch: " << sunroof_switch_result.status();
-        if (!engine_start_stationary_result.ok()) LOG(ERROR) << "  EngineStartStationary: " << engine_start_stationary_result.status();
-        if (!min_battery_voltage_result.ok()) LOG(ERROR) << "  MinBatteryVoltage: " << min_battery_voltage_result.status();
-        if (!min_fuel_level_result.ok()) LOG(ERROR) << "  MinFuelLevel: " << min_fuel_level_result.status();
+    if (!status.ok()) {
+        LOG(ERROR) << "Failed to resolve signals:\n" << status;
         return false;
     }
-
-    // Store handles (no more dereferencing needed!)
-    battery_voltage_ = *battery_voltage_result;
-    fuel_level_ = *fuel_level_result;
-    hvac_is_active_ = *hvac_is_active_result;  // Used for both monitoring and emergency shutoff
-    engine_is_running_ = *engine_is_running_result;
-    coolant_temp_ = *coolant_temp_result;
-    ambient_temp_ = *ambient_temp_result;
-    cabin_temp_ = *cabin_temp_result;
-    window_position_ = *window_position_result;
-    sunroof_switch_ = *sunroof_switch_result;
-    engine_start_stationary_ = *engine_start_stationary_result;
-    min_battery_voltage_ = *min_battery_voltage_result;
-    min_fuel_level_ = *min_fuel_level_result;
     LOG(INFO) << "All signal handles resolved successfully";
 
     // Create client
@@ -123,8 +91,15 @@ bool ClimateProtectionSystem::connect() {
     client_ = std::shared_ptr<kuksa::Client>(std::move(*client_result));
     LOG(INFO) << "Client created successfully";
 
+    // Subscribe to signals BEFORE starting client
+    subscribe_to_signals();
+
     // Start client (starts background threads for streams)
-    client_->start();
+    auto start_status = client_->start();
+    if (!start_status.ok()) {
+        LOG(ERROR) << "Failed to start client: " << start_status;
+        return false;
+    }
 
     // Wait for client to be ready
     auto ready_status = client_->wait_until_ready(std::chrono::milliseconds(5000));
@@ -176,8 +151,6 @@ void ClimateProtectionSystem::run() {
     LOG(INFO) << "  - Battery safe: > " << safe_battery_voltage_ << "V";
     LOG(INFO) << "  - Fuel critical: < " << min_fuel_level_threshold_ << "%";
     LOG(INFO) << "  - Min engine runtime: " << min_engine_runtime_.count() << " minutes";
-
-    subscribe_to_signals();
 
     // Main monitoring loop
     while (running_) {
@@ -354,41 +327,32 @@ void ClimateProtectionSystem::subscribe_to_signals() {
 
     auto self = this;  // Capture 'this' for callbacks
 
-    // Subscribe to battery voltage
-    client_->subscribe(battery_voltage_, [self](vss::types::QualifiedValue<float> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_battery_voltage_change(*qv.value);
-    });
-
-    // Subscribe to fuel level
-    client_->subscribe(fuel_level_, [self](vss::types::QualifiedValue<float> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_fuel_level_change(*qv.value);
-    });
-
-    // Subscribe to HVAC state
-    client_->subscribe(hvac_is_active_, [self](vss::types::QualifiedValue<bool> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_hvac_state_change(*qv.value);
-    });
-
-    // Subscribe to engine running state
-    client_->subscribe(engine_is_running_, [self](vss::types::QualifiedValue<bool> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_engine_state_change(*qv.value);
-    });
-
-    // Subscribe to coolant temperature
-    client_->subscribe(coolant_temp_, [self](vss::types::QualifiedValue<float> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_coolant_temp_change(*qv.value);
-    });
-
-    // Subscribe to ambient temperature
-    client_->subscribe(ambient_temp_, [self](vss::types::QualifiedValue<float> qv) {
-        if (!qv.is_valid()) return;
-        self->handle_ambient_temp_change(*qv.value);
-    });
+    // Batch subscribe using fluent API (no error handling needed!)
+    client_->subscriptions()
+        .subscribe(battery_voltage_, [self](vss::types::QualifiedValue<float> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_battery_voltage_change(*qv.value);
+        })
+        .subscribe(fuel_level_, [self](vss::types::QualifiedValue<float> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_fuel_level_change(*qv.value);
+        })
+        .subscribe(hvac_is_active_, [self](vss::types::QualifiedValue<bool> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_hvac_state_change(*qv.value);
+        })
+        .subscribe(engine_is_running_, [self](vss::types::QualifiedValue<bool> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_engine_state_change(*qv.value);
+        })
+        .subscribe(coolant_temp_, [self](vss::types::QualifiedValue<float> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_coolant_temp_change(*qv.value);
+        })
+        .subscribe(ambient_temp_, [self](vss::types::QualifiedValue<float> qv) {
+            if (!qv.is_valid()) return;
+            self->handle_ambient_temp_change(*qv.value);
+        });
 
     LOG(INFO) << "Subscribed to all signals";
 }

@@ -18,6 +18,7 @@
 
 #include <kuksa_cpp/types.hpp>
 #include <kuksa_cpp/error.hpp>
+#include <kuksa_cpp/subscription_builder.hpp>
 #include <glog/logging.h>
 #include <absl/strings/str_format.h>
 #include <string>
@@ -108,11 +109,11 @@ public:
      * The handle is resolved externally and passed in for registration.
      * The same handle is used for both actuation dispatch and publishing.
      *
-     * Must be called before start(). Cannot be called while client is running.
+     * Must be called before start().
      *
      * @param handle Signal handle for the actuator (from Resolver)
      * @param callback Called when actuation request arrives
-     * @return Status - OkStatus if queued successfully, FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      *
      * @warning The callback is executed on the provider gRPC thread.
      *          DO NOT call publish() from inside the callback - it will cause
@@ -124,14 +125,11 @@ public:
      * auto door = resolver->get<bool>("Vehicle.Door.IsLocked");
      * std::queue<Work> work_queue;
      *
-     * auto status = client->serve_actuator(door, [&](bool target, const SignalHandle<bool>& handle) {
+     * client->serve_actuator(door, [&](bool target, const SignalHandle<bool>& handle) {
      *     LOG(INFO) << "Lock door: " << target;
      *     work_queue.push({handle, target});  // Queue for processing
      *     // DON'T: client->publish(handle, target);  // WRONG - causes gRPC error!
      * });
-     * if (!status.ok()) {
-     *     LOG(ERROR) << "Failed to register actuator: " << status;
-     * }
      *
      * // Later, from worker thread:
      * auto [handle, value] = work_queue.pop();
@@ -139,10 +137,10 @@ public:
      * @endcode
      */
     template<typename T, typename Callback>
-    Status serve_actuator(
+    void serve_actuator(
         const SignalHandle<T>& handle,
         Callback&& callback) {
-        return serve_actuator_impl(
+        serve_actuator_impl(
             handle.path(),
             handle.id(),
             vss::types::get_value_type<T>(),
@@ -159,13 +157,13 @@ public:
      *
      * @param handle Dynamic handle for the actuator
      * @param callback Called when actuation request arrives
-     * @return Status - FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      */
     template<typename Callback>
-    Status serve_actuator(
+    void serve_actuator(
         const DynamicSignalHandle& handle,
         Callback&& callback) {
-        return serve_actuator_impl(
+        serve_actuator_impl(
             handle.path(),
             handle.id(),
             handle.type(),
@@ -177,9 +175,9 @@ public:
 
     /**
      * @brief Internal implementation for actuator registration
-     * @return Status - FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      */
-    virtual Status serve_actuator_impl(
+    virtual void serve_actuator_impl(
         const std::string& path,
         int32_t signal_id,
         vss::types::ValueType type,
@@ -432,7 +430,7 @@ public:
      * start() is called. Any errors (invalid signal ID, connection failure) will be
      * reported via start() or wait_until_ready().
      *
-     * Must be called before start(). Cannot be called while client is running.
+     * Must be called before start().
      *
      * @warning The callback is executed on the subscription thread.
      *          It MUST NOT block or perform long-running operations.
@@ -440,17 +438,17 @@ public:
      *
      * @param signal Signal handle (obtained from Resolver)
      * @param callback Called when signal value changes or on initial value
-     * @return Status indicating success or failure (e.g., if called after start())
+     * @throws std::logic_error if client is already running
      */
     template<typename T>
-    Status subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
+    void subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
 
     /**
      * @brief Subscribe with dynamic handle
      *
-     * @return Status indicating success or failure (e.g., if called after start())
+     * @throws std::logic_error if client is already running
      */
-    Status subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
+    void subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
 
     /**
      * @brief Unsubscribe from a signal
@@ -476,6 +474,45 @@ public:
      * @brief Get number of active subscriptions
      */
     virtual size_t subscription_count() const = 0;
+
+    // ========================================================================
+    // BATCH SUBSCRIPTION BUILDER (Fluent API)
+    // ========================================================================
+
+    /**
+     * @brief Create a batch subscription/actuator setup builder
+     *
+     * Returns a builder for setting up multiple subscriptions and actuators
+     * before client start. This eliminates per-call error handling since the
+     * only failure mode is "client already started", which is a programmer
+     * error caught via CHECK.
+     *
+     * Each .subscribe() or .serve() call executes immediately - the builder
+     * is just syntactic sugar for fluent API and validation.
+     *
+     * @return SubscriptionSetBuilder for chaining subscribe()/serve() calls
+     *
+     * Example:
+     * @code
+     * // 1. Batch resolve signals
+     * auto status = resolver->signals()
+     *     .add(battery_voltage, "Vehicle.LowVoltageBattery.CurrentVoltage")
+     *     .add(door_lock, "Vehicle.Cabin.Door.Row1.Left.IsLocked")
+     *     .resolve();
+     * if (!status.ok()) return false;
+     *
+     * // 2. Batch setup subscriptions/actuators (no error handling!)
+     * client->subscriptions()
+     *     .subscribe(battery_voltage, [](auto v) { LOG(INFO) << v.value; })
+     *     .serve(door_lock, [](auto cmd, auto h) { LOG(INFO) << cmd; });
+     *
+     * // 3. Start client
+     * client->start();
+     * @endcode
+     */
+    SubscriptionSetBuilder subscriptions() {
+        return SubscriptionSetBuilder(this);
+    }
 
     // ========================================================================
     // LIFECYCLE
@@ -555,7 +592,7 @@ protected:
         std::function<void(const std::map<int32_t, Status>&)> callback
     ) = 0;
 
-    virtual Status subscribe_impl(
+    virtual void subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback
     ) = 0;
@@ -649,12 +686,13 @@ inline Status Client::set(const DynamicSignalHandle& signal, const vss::types::D
 
 // Subscription implementations
 template<typename T>
-Status Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
+void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
     if (!signal.is_valid()) {
-        return absl::FailedPreconditionError("Cannot subscribe() with invalid signal handle");
+        LOG(ERROR) << "Cannot subscribe() with invalid signal handle";
+        throw std::invalid_argument("Cannot subscribe() with invalid signal handle");
     }
 
-    return subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
+    subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
         // Convert DynamicQualifiedValue to QualifiedValue<T>
         if (vss::types::is_empty(dyn_qvalue.value)) {
             vss::types::QualifiedValue<T> qvalue;
@@ -673,6 +711,32 @@ Status Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>
             }
         }
     });
+}
+
+// ============================================================================
+// SubscriptionSetBuilder Template Implementation
+// ============================================================================
+
+// Implementation of SubscriptionSetBuilder::subscribe() - must come after Client definition
+template<typename T, typename Callback>
+SubscriptionSetBuilder& SubscriptionSetBuilder::subscribe(
+    const SignalHandle<T>& handle,
+    Callback&& callback
+) {
+    // Just call through - subscribe() will throw if client is running
+    client_->subscribe(handle, std::forward<Callback>(callback));
+    return *this;
+}
+
+// Implementation of SubscriptionSetBuilder::serve() - must come after Client definition
+template<typename T, typename Callback>
+SubscriptionSetBuilder& SubscriptionSetBuilder::serve(
+    const SignalHandle<T>& handle,
+    Callback&& callback
+) {
+    // Just call through - serve_actuator() will throw if client is running
+    client_->serve_actuator(handle, std::forward<Callback>(callback));
+    return *this;
 }
 
 } // namespace kuksa
