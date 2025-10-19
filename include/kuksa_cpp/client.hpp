@@ -581,6 +581,10 @@ protected:
 // Synchronous get() implementations
 template<typename T>
 Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal) {
+    if (!signal.is_valid()) {
+        return absl::FailedPreconditionError("Cannot get() with invalid signal handle");
+    }
+
     auto result = get_impl(signal.id());
     if (!result.ok()) {
         return result.status();
@@ -620,6 +624,10 @@ inline Result<vss::types::DynamicQualifiedValue> Client::get(const DynamicSignal
 // Synchronous set() implementations
 template<typename T>
 Status Client::set(const SignalHandle<T>& signal, const vss::types::QualifiedValue<T>& qvalue) {
+    if (!signal.is_valid()) {
+        return absl::FailedPreconditionError("Cannot set() with invalid signal handle");
+    }
+
     // Convert to DynamicQualifiedValue
     vss::types::DynamicQualifiedValue dyn_qvalue;
     if (qvalue.value.has_value()) {
@@ -642,6 +650,10 @@ inline Status Client::set(const DynamicSignalHandle& signal, const vss::types::D
 // Subscription implementations
 template<typename T>
 Status Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
+    if (!signal.is_valid()) {
+        return absl::FailedPreconditionError("Cannot subscribe() with invalid signal handle");
+    }
+
     return subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
         // Convert DynamicQualifiedValue to QualifiedValue<T>
         if (vss::types::is_empty(dyn_qvalue.value)) {

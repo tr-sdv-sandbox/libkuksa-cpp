@@ -97,6 +97,38 @@ class SignalHandle {
 public:
     using Callback = std::function<void(vss::types::QualifiedValue<T>)>;
 
+    /**
+     * @brief Default constructor - creates an invalid handle
+     *
+     * An invalid handle can be used as a placeholder and assigned later.
+     * Operations on an invalid handle will fail with appropriate errors.
+     *
+     * Example:
+     * @code
+     * class MyClass {
+     *     kuksa::SignalHandle<float> speed_;  // Default constructed, invalid
+     * public:
+     *     bool init(kuksa::Resolver* resolver) {
+     *         auto result = resolver->get<float>("Vehicle.Speed");
+     *         if (!result.ok()) return false;
+     *         speed_ = *result;  // Assign valid handle
+     *         return true;
+     *     }
+     * };
+     * @endcode
+     */
+    SignalHandle() : handle_(nullptr) {}
+
+    /**
+     * @brief Check if handle is valid (has been successfully resolved)
+     */
+    bool is_valid() const { return handle_ != nullptr; }
+
+    /**
+     * @brief Explicit bool conversion - returns true if handle is valid
+     */
+    explicit operator bool() const { return is_valid(); }
+
     // Accessors delegate to underlying DynamicSignalHandle
     const std::string& path() const;
     int32_t id() const;
@@ -182,22 +214,23 @@ protected:
 
 template<typename T>
 inline const std::string& SignalHandle<T>::path() const {
-    return handle_->path();
+    static const std::string invalid_path = "<invalid>";
+    return handle_ ? handle_->path() : invalid_path;
 }
 
 template<typename T>
 inline int32_t SignalHandle<T>::id() const {
-    return handle_->id();
+    return handle_ ? handle_->id() : -1;
 }
 
 template<typename T>
 inline vss::types::ValueType SignalHandle<T>::type() const {
-    return handle_->type();
+    return handle_ ? handle_->type() : vss::types::ValueType::BOOL;  // Arbitrary default
 }
 
 template<typename T>
 inline SignalClass SignalHandle<T>::signal_class() const {
-    return handle_->signal_class();
+    return handle_ ? handle_->signal_class() : SignalClass::UNKNOWN;
 }
 
 } // namespace kuksa

@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
 
     // Get RW handles for sensors we want to publish
     auto rpm_result = resolver->get<uint32_t>("Vehicle.Powertrain.CombustionEngine.Speed");
-    auto temp_result = resolver->get<float>("Vehicle.Cabin.Temperature");
+    auto temp_result = resolver->get<float>("Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature");
     auto speed_rw_result = resolver->get<float>("Vehicle.Speed");
 
     if (rpm_result.ok() && temp_result.ok() && speed_rw_result.ok()) {
