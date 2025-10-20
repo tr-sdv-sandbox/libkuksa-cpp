@@ -244,7 +244,7 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
     auto client = *Client::create(getKuksaAddress());
     client_ptr = client.get();
 
-    auto serve_status = client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client received actuation command: " << target;
         last_actuator_command = target;
 
@@ -254,7 +254,6 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
-    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     auto start_status = client->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
@@ -289,13 +288,12 @@ TEST_F(AccessorPatternTest, StateMachineWithSeparateAccessor) {
     auto subscriber = *Client::create(getKuksaAddress());
 
     // Subscribe to temperature updates (using test sensor)
-    auto subscribe_status = subscriber->subscribe(cabin_temp, [&state_machine](vss::types::QualifiedValue<float> qvalue) {
+    subscriber->subscribe(cabin_temp, [&state_machine](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             // Non-blocking call - just posts event
             state_machine.on_temperature_update(*qvalue.value);
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto sub_start_status = subscriber->start();
     ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
@@ -363,7 +361,7 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     auto client = *Client::create(getKuksaAddress());
     client_ptr = client.get();
 
-    auto serve_status2 = client->serve_actuator(client_actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(client_actuator, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client processing command: " << target;
         actuator_commands_received++;
 
@@ -376,7 +374,6 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
-    ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
     auto start_status2 = client->start();
     ASSERT_TRUE(start_status2.ok()) << "Failed to start client: " << start_status2;
@@ -404,26 +401,24 @@ TEST_F(AccessorPatternTest, CompletePatternShowcase) {
     std::atomic<int32_t> sensor_updates_received(0);
     std::atomic<float> last_sensor_value(0.0f);
 
-    auto subscribe_status1 = subscriber->subscribe(test_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    subscriber->subscribe(test_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscriber received sensor update: " << *qvalue.value;
             last_sensor_value = *qvalue.value;
             sensor_updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to sensor: " << subscribe_status1;
 
     std::atomic<int32_t> actuator_updates_received(0);
     std::atomic<int32_t> last_actuator_value(0);
 
-    auto subscribe_status2 = subscriber->subscribe(test_actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    subscriber->subscribe(test_actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscriber received actuator feedback: " << *qvalue.value;
             last_actuator_value = *qvalue.value;
             actuator_updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to actuator: " << subscribe_status2;
 
     auto sub_start_status2 = subscriber->start();
     ASSERT_TRUE(sub_start_status2.ok()) << "Failed to start subscriber: " << sub_start_status2;

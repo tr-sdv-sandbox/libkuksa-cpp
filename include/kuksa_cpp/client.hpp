@@ -18,7 +18,6 @@
 
 #include <kuksa_cpp/types.hpp>
 #include <kuksa_cpp/error.hpp>
-#include <kuksa_cpp/subscription_builder.hpp>
 #include <glog/logging.h>
 #include <absl/strings/str_format.h>
 #include <string>
@@ -227,6 +226,73 @@ public:
      * @brief Synchronously get value with dynamic handle
      */
     Result<vss::types::DynamicQualifiedValue> get(const DynamicSignalHandle& signal);
+
+    /**
+     * @brief Convenience: Get unwrapped value (for configuration/attribute reads)
+     *
+     * Simplifies the common pattern of reading configuration values or attributes
+     * where quality metadata is not needed. Unwraps both Result and QualifiedValue
+     * layers in one call.
+     *
+     * Returns Result<T> instead of Result<QualifiedValue<T>>, making it easy to
+     * use with .value_or() for defaulting.
+     *
+     * Error cases:
+     * - RPC fails → Returns RPC error status
+     * - Signal quality is not VALID → Returns UnavailableError with quality info
+     *
+     * @param signal Signal handle
+     * @return Result<T> containing the unwrapped value, or error status
+     *
+     * Example:
+     * @code
+     * // Simple: Extract value with default fallback
+     * float threshold = client->get_value(config_handle).value_or(23.6f);
+     *
+     * // With error checking:
+     * auto threshold = client->get_value(config_handle);
+     * if (threshold.ok()) {
+     *     LOG(INFO) << "Config value: " << *threshold;
+     * } else {
+     *     LOG(WARNING) << "Using default: " << threshold.status();
+     * }
+     * @endcode
+     */
+    template<typename T>
+    Result<T> get_value(const SignalHandle<T>& signal);
+
+    /**
+     * @brief Batch read multiple configuration values
+     *
+     * Reads multiple signals and returns their values as a tuple. Convenient for
+     * reading configuration/attributes at startup with structured binding.
+     *
+     * If any signal fails to read (RPC error or non-VALID quality), the entire
+     * operation fails and returns an error status.
+     *
+     * @param signals Signal handles to read
+     * @return Result<tuple<T1, T2, ...>> containing all values, or error status
+     *
+     * Example:
+     * @code
+     * // Read multiple configs with defaults
+     * auto [min_voltage, min_fuel] = client->get_values(
+     *     min_battery_voltage_,
+     *     min_fuel_level_
+     * ).value_or({23.6f, 10.0f});
+     *
+     * // With error checking:
+     * auto config = client->get_values(min_voltage_handle, min_fuel_handle);
+     * if (config.ok()) {
+     *     auto [voltage, fuel] = *config;
+     *     LOG(INFO) << "Config: " << voltage << "V, " << fuel << "%";
+     * } else {
+     *     LOG(ERROR) << "Failed to read config: " << config.status();
+     * }
+     * @endcode
+     */
+    template<typename... Ts>
+    Result<std::tuple<Ts...>> get_values(const SignalHandle<Ts>&... signals);
 
     /**
      * @brief Synchronously set signal value with quality
@@ -476,45 +542,6 @@ public:
     virtual size_t subscription_count() const = 0;
 
     // ========================================================================
-    // BATCH SUBSCRIPTION BUILDER (Fluent API)
-    // ========================================================================
-
-    /**
-     * @brief Create a batch subscription/actuator setup builder
-     *
-     * Returns a builder for setting up multiple subscriptions and actuators
-     * before client start. This eliminates per-call error handling since the
-     * only failure mode is "client already started", which is a programmer
-     * error caught via CHECK.
-     *
-     * Each .subscribe() or .serve() call executes immediately - the builder
-     * is just syntactic sugar for fluent API and validation.
-     *
-     * @return SubscriptionSetBuilder for chaining subscribe()/serve() calls
-     *
-     * Example:
-     * @code
-     * // 1. Batch resolve signals
-     * auto status = resolver->signals()
-     *     .add(battery_voltage, "Vehicle.LowVoltageBattery.CurrentVoltage")
-     *     .add(door_lock, "Vehicle.Cabin.Door.Row1.Left.IsLocked")
-     *     .resolve();
-     * if (!status.ok()) return false;
-     *
-     * // 2. Batch setup subscriptions/actuators (no error handling!)
-     * client->subscriptions()
-     *     .subscribe(battery_voltage, [](auto v) { LOG(INFO) << v.value; })
-     *     .serve(door_lock, [](auto cmd, auto h) { LOG(INFO) << cmd; });
-     *
-     * // 3. Start client
-     * client->start();
-     * @endcode
-     */
-    SubscriptionSetBuilder subscriptions() {
-        return SubscriptionSetBuilder(this);
-    }
-
-    // ========================================================================
     // LIFECYCLE
     // ========================================================================
 
@@ -658,6 +685,64 @@ inline Result<vss::types::DynamicQualifiedValue> Client::get(const DynamicSignal
     return get_impl(signal.id());
 }
 
+// Synchronous get_value() implementation
+template<typename T>
+Result<T> Client::get_value(const SignalHandle<T>& signal) {
+    // Call get() to retrieve QualifiedValue
+    auto result = get(signal);
+    if (!result.ok()) {
+        return result.status();
+    }
+
+    const auto& qvalue = *result;
+
+    // Check if value is present
+    if (!qvalue.value.has_value()) {
+        return absl::UnavailableError(
+            absl::StrFormat("Signal %s has no value (quality: %s)",
+                signal.path(),
+                vss::types::signal_quality_to_string(qvalue.quality))
+        );
+    }
+
+    // Check quality - only accept VALID
+    if (qvalue.quality != vss::types::SignalQuality::VALID) {
+        return absl::UnavailableError(
+            absl::StrFormat("Signal %s quality is %s (not VALID)",
+                signal.path(),
+                vss::types::signal_quality_to_string(qvalue.quality))
+        );
+    }
+
+    return *qvalue.value;
+}
+
+// Batch get_values() implementation
+template<typename... Ts>
+Result<std::tuple<Ts...>> Client::get_values(const SignalHandle<Ts>&... signals) {
+    // Call get_value() for each signal
+    std::tuple<Result<Ts>...> results = std::make_tuple(get_value(signals)...);
+
+    // Check if all succeeded
+    bool all_ok = std::apply([](const auto&... r) {
+        return (r.ok() && ...);
+    }, results);
+
+    if (!all_ok) {
+        // Find first error for reporting
+        absl::Status first_error;
+        std::apply([&first_error](const auto&... r) {
+            ((r.ok() || (first_error.ok() && (first_error = r.status(), true))) && ...);
+        }, results);
+        return first_error;
+    }
+
+    // Extract values into tuple
+    return std::apply([](auto&&... r) {
+        return std::make_tuple(*r...);
+    }, results);
+}
+
 // Synchronous set() implementations
 template<typename T>
 Status Client::set(const SignalHandle<T>& signal, const vss::types::QualifiedValue<T>& qvalue) {
@@ -711,32 +796,6 @@ void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::
             }
         }
     });
-}
-
-// ============================================================================
-// SubscriptionSetBuilder Template Implementation
-// ============================================================================
-
-// Implementation of SubscriptionSetBuilder::subscribe() - must come after Client definition
-template<typename T, typename Callback>
-SubscriptionSetBuilder& SubscriptionSetBuilder::subscribe(
-    const SignalHandle<T>& handle,
-    Callback&& callback
-) {
-    // Just call through - subscribe() will throw if client is running
-    client_->subscribe(handle, std::forward<Callback>(callback));
-    return *this;
-}
-
-// Implementation of SubscriptionSetBuilder::serve() - must come after Client definition
-template<typename T, typename Callback>
-SubscriptionSetBuilder& SubscriptionSetBuilder::serve(
-    const SignalHandle<T>& handle,
-    Callback&& callback
-) {
-    // Just call through - serve_actuator() will throw if client is running
-    client_->serve_actuator(handle, std::forward<Callback>(callback));
-    return *this;
 }
 
 } // namespace kuksa

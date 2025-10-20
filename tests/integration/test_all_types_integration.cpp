@@ -64,16 +64,12 @@ protected:
         T received_value{};
 
         // Subscribe
-        auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 received_value = *qvalue.value;
                 received = true;
             }
         });
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return false;
-        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -133,16 +129,12 @@ protected:
         T received_value{};
 
         // Subscribe
-        auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
+        subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 received_value = *qvalue.value;
                 received = true;
             }
         });
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return false;
-        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -197,16 +189,12 @@ protected:
         std::atomic<bool> actual_received(false);
         T actual_value{};
 
-        auto subscribe_status = subscriber->subscribe(actuator_handle, [&](vss::types::QualifiedValue<T> qvalue) {
+        subscriber->subscribe(actuator_handle, [&](vss::types::QualifiedValue<T> qvalue) {
             if (qvalue.is_valid()) {
                 actual_value = *qvalue.value;
                 actual_received = true;
             }
         });
-        if (!subscribe_status.ok()) {
-            LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-            return false;
-        }
 
         auto start_status = subscriber->start();
         if (!start_status.ok()) {
@@ -228,7 +216,7 @@ protected:
         auto client = *Client::create(getKuksaAddress());
         client_ptr = client.get();
 
-        auto serve_status = client->serve_actuator(actuator_rw_handle, [&, client_ptr](T target, const SignalHandle<T>& handle) {
+        client->serve_actuator(actuator_rw_handle, [&, client_ptr](T target, const SignalHandle<T>& handle) {
             target_value = target;
             target_received = true;
 
@@ -238,9 +226,6 @@ protected:
                 LOG(ERROR) << "Failed to publish actual: " << status;
             }
         });
-        if (!serve_status.ok()) {
-            return false;
-        }
 
         auto client_start_status = client->start();
         if (!client_start_status.ok()) {

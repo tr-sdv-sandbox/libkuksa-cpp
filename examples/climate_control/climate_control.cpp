@@ -8,40 +8,10 @@
 
 #include "climate_control.hpp"
 
-// State name functions for observability
-std::string protection_state_name(ProtectionState state) {
-    switch (state) {
-        case ProtectionState::MONITORING:                return "MONITORING";
-        case ProtectionState::BATTERY_LOW_ENGINE_START:  return "BATTERY_LOW_ENGINE_START";
-        case ProtectionState::ENGINE_CHARGING:           return "ENGINE_CHARGING";
-        case ProtectionState::FUEL_LOW_HVAC_SHUTDOWN:   return "FUEL_LOW_HVAC_SHUTDOWN";
-        case ProtectionState::EMERGENCY_SHUTDOWN:        return "EMERGENCY_SHUTDOWN";
-        default:                                         return "UNKNOWN";
-    }
-}
-
-std::string engine_state_name(EngineState state) {
-    switch (state) {
-        case EngineState::STOPPED:              return "STOPPED";
-        case EngineState::STARTING:             return "STARTING";
-        case EngineState::RUNNING_FOR_CHARGE:   return "RUNNING_FOR_CHARGE";
-        case EngineState::STOPPING:             return "STOPPING";
-        default:                                return "UNKNOWN";
-    }
-}
-
 ClimateProtectionSystem::ClimateProtectionSystem(const std::string& kuksa_url)
-        : protection_sm_("ClimateProtection", ProtectionState::MONITORING),
-          engine_sm_("EngineManagement", EngineState::STOPPED),
-          kuksa_url_(kuksa_url),
+        : kuksa_url_(kuksa_url),
           running_(true) {
-
-    // Set state name functions for observability
-    protection_sm_.set_state_name_function(protection_state_name);
-    engine_sm_.set_state_name_function(engine_state_name);
-
-    setup_states();
-    setup_transitions();
+    // State machines will be initialized in setup_state_machines() after client is created
 }
 
 bool ClimateProtectionSystem::connect() {
@@ -67,9 +37,6 @@ bool ClimateProtectionSystem::connect() {
         .add(coolant_temp_, "Vehicle.OBD.CoolantTemperature")
         .add(ambient_temp_, "Vehicle.Cabin.HVAC.AmbientAirTemperature")
         .add(cabin_temp_, "Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature")
-        // Protection action outputs (VSS 5.1)
-        .add(window_position_, "Vehicle.Cabin.Door.Row1.DriverSide.Window.Position")  // uint8 with transparent type mapping!
-        .add(sunroof_switch_, "Vehicle.Cabin.Sunroof.Switch")
         // Custom signals (vss_extensions.json)
         .add(engine_start_stationary_, "Vehicle.Private.Engine.IsStartWithoutIntentionToDrive")
         .add(min_battery_voltage_, "Vehicle.Private.HVAC.MinimumBatteryVoltageForHVAC")
@@ -90,6 +57,9 @@ bool ClimateProtectionSystem::connect() {
     }
     client_ = std::shared_ptr<kuksa::Client>(std::move(*client_result));
     LOG(INFO) << "Client created successfully";
+
+    // Setup state machines with client callbacks
+    setup_state_machines();
 
     // Subscribe to signals BEFORE starting client
     subscribe_to_signals();
@@ -118,25 +88,21 @@ bool ClimateProtectionSystem::connect() {
 void ClimateProtectionSystem::read_configuration() {
     LOG(INFO) << "Reading configuration attributes...";
 
-    // Read minimum battery voltage threshold
-    auto min_voltage = client_->get(min_battery_voltage_);
-    if (min_voltage.ok() && min_voltage->is_valid()) {
-        min_battery_voltage_threshold_ = min_voltage->value.value();
-        LOG(INFO) << "Minimum battery voltage threshold: " << min_battery_voltage_threshold_ << "V";
-    } else {
-        LOG(WARNING) << "Could not read MinimumBatteryVoltageForHVAC, using default: "
-                     << min_battery_voltage_threshold_ << "V";
-    }
+    // Read configuration values (using get_values() for batch read with defaults)
+    auto [min_voltage, min_fuel] = client_->get_values(
+        min_battery_voltage_,
+        min_fuel_level_
+    ).value_or(std::tuple{
+        min_battery_voltage_threshold_,  // Default: 23.6V
+        min_fuel_level_threshold_         // Default: 10.0%
+    });
 
-    // Read minimum fuel level threshold
-    auto min_fuel = client_->get(min_fuel_level_);
-    if (min_fuel.ok() && min_fuel->is_valid()) {
-        min_fuel_level_threshold_ = min_fuel->value.value();
-        LOG(INFO) << "Minimum fuel level threshold: " << min_fuel_level_threshold_ << "%";
-    } else {
-        LOG(WARNING) << "Could not read MinimumFuelLevelForHVAC, using default: "
-                     << min_fuel_level_threshold_ << "%";
-    }
+    min_battery_voltage_threshold_ = min_voltage;
+    min_fuel_level_threshold_ = min_fuel;
+
+    LOG(INFO) << "Configuration:";
+    LOG(INFO) << "  Minimum battery voltage threshold: " << min_battery_voltage_threshold_ << "V";
+    LOG(INFO) << "  Minimum fuel level threshold: " << min_fuel_level_threshold_ << "%";
 }
 
 void ClimateProtectionSystem::run() {
@@ -150,7 +116,7 @@ void ClimateProtectionSystem::run() {
     LOG(INFO) << "  - Battery critical: < " << min_battery_voltage_threshold_ << "V";
     LOG(INFO) << "  - Battery safe: > " << safe_battery_voltage_ << "V";
     LOG(INFO) << "  - Fuel critical: < " << min_fuel_level_threshold_ << "%";
-    LOG(INFO) << "  - Min engine runtime: " << min_engine_runtime_.count() << " minutes";
+    LOG(INFO) << "  - Min engine runtime: 10 minutes";
 
     // Main monitoring loop
     while (running_) {
@@ -159,7 +125,6 @@ void ClimateProtectionSystem::run() {
         // Periodic protection checks
         check_battery_protection();
         check_fuel_protection();
-        check_smart_ventilation();
     }
 
     LOG(INFO) << "Climate protection system stopped";
@@ -169,156 +134,37 @@ void ClimateProtectionSystem::stop() {
     running_ = false;
 }
 
-void ClimateProtectionSystem::setup_states() {
-    // Protection state machine states
-    protection_sm_.define_state(ProtectionState::MONITORING)
-        .on_entry([this]() {
-            LOG(INFO) << "Protection: Normal monitoring mode";
-        });
+void ClimateProtectionSystem::setup_state_machines() {
+    // Create HVAC controller callback
+    auto hvac_controller = [this](bool active) {
+        auto status = client_->set(hvac_is_active_, active);
+        if (!status.ok()) {
+            LOG(ERROR) << "Failed to control HVAC: " << status;
+        }
+    };
 
-    protection_sm_.define_state(ProtectionState::BATTERY_LOW_ENGINE_START)
-        .on_entry([this]() {
-            LOG(WARNING) << "Protection: Battery low, attempting to start engine";
-            start_engine_for_charging();
-        });
+    // Create engine starter callback (triggers engine state machine)
+    auto engine_starter = [this]() {
+        engine_sm_->trigger_start_for_charge();
+    };
 
-    protection_sm_.define_state(ProtectionState::ENGINE_CHARGING)
-        .on_entry([this]() {
-            LOG(INFO) << "Protection: Engine running for battery charging";
-        });
+    // Create engine controller callback
+    auto engine_controller = [this](bool start) {
+        auto status = client_->set(engine_start_stationary_, start);
+        if (!status.ok()) {
+            LOG(ERROR) << "Failed to control engine: " << status;
+        }
+    };
 
-    protection_sm_.define_state(ProtectionState::FUEL_LOW_HVAC_SHUTDOWN)
-        .on_entry([this]() {
-            LOG(WARNING) << "Protection: Fuel critically low, shutting down HVAC";
-            // Emergency shutoff HVAC
-            auto status = client_->set(hvac_is_active_, false);
-            if (!status.ok()) {
-                LOG(ERROR) << "Failed to shut down HVAC: " << status;
-            }
-        });
-
-    protection_sm_.define_state(ProtectionState::EMERGENCY_SHUTDOWN)
-        .on_entry([this]() {
-            LOG(ERROR) << "Protection: EMERGENCY - Both battery and fuel critical!";
-            // Emergency shutoff everything
-            auto status = client_->set(hvac_is_active_, false);
-            if (!status.ok()) {
-                LOG(ERROR) << "Failed to emergency shutdown HVAC: " << status;
-            }
-        });
-
-    // Engine state machine states
-    engine_sm_.define_state(EngineState::STOPPED)
-        .on_entry([this]() {
-            LOG(INFO) << "Engine: Stopped";
-            engine_started_by_us_ = false;
-        });
-
-    engine_sm_.define_state(EngineState::STARTING)
-        .on_entry([this]() {
-            LOG(INFO) << "Engine: Starting without intention to drive...";
-            auto status = client_->set(engine_start_stationary_, true);
-            if (!status.ok()) {
-                LOG(ERROR) << "Failed to send engine start command: " << status;
-            }
-        });
-
-    engine_sm_.define_state(EngineState::RUNNING_FOR_CHARGE)
-        .on_entry([this]() {
-            LOG(INFO) << "Engine: Running for battery charging";
-            engine_started_by_us_ = true;
-            engine_start_time_ = std::chrono::steady_clock::now();
-        });
-
-    engine_sm_.define_state(EngineState::STOPPING)
-        .on_entry([this]() {
-            LOG(INFO) << "Engine: Stopping stationary engine...";
-            auto status = client_->set(engine_start_stationary_, false);
-            if (!status.ok()) {
-                LOG(ERROR) << "Failed to send engine stop command: " << status;
-            }
-        });
-}
-
-void ClimateProtectionSystem::setup_transitions() {
-    // ========== Protection State Machine Transitions ==========
-
-    // Normal monitoring -> Battery low
-    protection_sm_.add_transition(
-        ProtectionState::MONITORING,
-        ProtectionState::BATTERY_LOW_ENGINE_START,
-        "battery_critical"
+    // Initialize state machines with callbacks
+    protection_sm_ = std::make_unique<ClimateProtectionStateMachine>(
+        hvac_controller,
+        engine_starter
     );
 
-    // Battery low -> Engine charging (when engine starts)
-    protection_sm_.add_transition(
-        ProtectionState::BATTERY_LOW_ENGINE_START,
-        ProtectionState::ENGINE_CHARGING,
-        "engine_started"
-    );
-
-    // Engine charging -> Normal monitoring (when battery recovered)
-    protection_sm_.add_transition(
-        ProtectionState::ENGINE_CHARGING,
-        ProtectionState::MONITORING,
-        "battery_recovered"
-    );
-
-    // Any state -> Fuel low shutdown
-    protection_sm_.add_transition(
-        ProtectionState::MONITORING,
-        ProtectionState::FUEL_LOW_HVAC_SHUTDOWN,
-        "fuel_critical"
-    );
-
-    protection_sm_.add_transition(
-        ProtectionState::ENGINE_CHARGING,
-        ProtectionState::FUEL_LOW_HVAC_SHUTDOWN,
-        "fuel_critical"
-    );
-
-    // Fuel low -> Emergency (if battery also critical)
-    protection_sm_.add_transition(
-        ProtectionState::FUEL_LOW_HVAC_SHUTDOWN,
-        ProtectionState::EMERGENCY_SHUTDOWN,
-        "battery_critical"
-    );
-
-    // Recovery from fuel low
-    protection_sm_.add_transition(
-        ProtectionState::FUEL_LOW_HVAC_SHUTDOWN,
-        ProtectionState::MONITORING,
-        "fuel_recovered"
-    );
-
-    // ========== Engine State Machine Transitions ==========
-
-    // Stopped -> Starting
-    engine_sm_.add_transition(
-        EngineState::STOPPED,
-        EngineState::STARTING,
-        "start_for_charge"
-    );
-
-    // Starting -> Running (when engine reports running)
-    engine_sm_.add_transition(
-        EngineState::STARTING,
-        EngineState::RUNNING_FOR_CHARGE,
-        "engine_running"
-    );
-
-    // Running -> Stopping (when conditions met)
-    engine_sm_.add_transition(
-        EngineState::RUNNING_FOR_CHARGE,
-        EngineState::STOPPING,
-        "stop_charging"
-    );
-
-    // Stopping -> Stopped (when engine reports stopped)
-    engine_sm_.add_transition(
-        EngineState::STOPPING,
-        EngineState::STOPPED,
-        "engine_stopped"
+    engine_sm_ = std::make_unique<EngineManagementStateMachine>(
+        engine_controller,
+        std::chrono::minutes(10)  // Minimum 10 minutes runtime
     );
 }
 
@@ -327,32 +173,102 @@ void ClimateProtectionSystem::subscribe_to_signals() {
 
     auto self = this;  // Capture 'this' for callbacks
 
-    // Batch subscribe using fluent API (no error handling needed!)
-    client_->subscriptions()
-        .subscribe(battery_voltage_, [self](vss::types::QualifiedValue<float> qv) {
-            if (!qv.is_valid()) return;
-            self->handle_battery_voltage_change(*qv.value);
-        })
-        .subscribe(fuel_level_, [self](vss::types::QualifiedValue<float> qv) {
-            if (!qv.is_valid()) return;
-            self->handle_fuel_level_change(*qv.value);
-        })
-        .subscribe(hvac_is_active_, [self](vss::types::QualifiedValue<bool> qv) {
-            if (!qv.is_valid()) return;
+    // Subscribe to all signals (errors reported at start())
+    // CRITICAL: Battery voltage - system cannot operate safely without this
+    client_->subscribe(battery_voltage_, [self](vss::types::QualifiedValue<float> qv) {
+        using vss::types::SignalQuality;
+        switch (qv.quality) {
+            case SignalQuality::VALID:
+                self->battery_voltage_available_ = true;
+                self->handle_battery_voltage_change(*qv.value);
+                break;
+            case SignalQuality::NOT_AVAILABLE:
+                LOG(ERROR) << "Battery voltage signal lost - entering safe mode";
+                self->handle_battery_voltage_loss();
+                break;
+            case SignalQuality::INVALID:
+                LOG(ERROR) << "Battery voltage signal invalid - cannot trust data";
+                self->handle_battery_voltage_loss();
+                break;
+            case SignalQuality::STALE:
+                LOG(WARNING) << "Battery voltage data stale, continuing with last value: "
+                            << self->current_battery_voltage_ << "V (DEGRADED)";
+                self->system_degraded_ = true;
+                break;
+        }
+    });
+
+    // CRITICAL: Fuel level - needed for engine start decisions
+    client_->subscribe(fuel_level_, [self](vss::types::QualifiedValue<float> qv) {
+        using vss::types::SignalQuality;
+        switch (qv.quality) {
+            case SignalQuality::VALID:
+                self->fuel_level_available_ = true;
+                self->handle_fuel_level_change(*qv.value);
+                break;
+            case SignalQuality::NOT_AVAILABLE:
+                LOG(ERROR) << "Fuel level signal lost - assuming low fuel";
+                self->handle_fuel_level_loss();
+                break;
+            case SignalQuality::INVALID:
+                LOG(ERROR) << "Fuel level signal invalid - assuming low fuel";
+                self->handle_fuel_level_loss();
+                break;
+            case SignalQuality::STALE:
+                LOG(WARNING) << "Fuel level data stale, using last value: "
+                            << self->current_fuel_level_ << "% (DEGRADED)";
+                self->system_degraded_ = true;
+                break;
+        }
+    });
+
+    // Important: HVAC state (can continue with stale data briefly)
+    client_->subscribe(hvac_is_active_, [self](vss::types::QualifiedValue<bool> qv) {
+        using vss::types::SignalQuality;
+        if (qv.quality == SignalQuality::VALID) {
             self->handle_hvac_state_change(*qv.value);
-        })
-        .subscribe(engine_is_running_, [self](vss::types::QualifiedValue<bool> qv) {
-            if (!qv.is_valid()) return;
+        } else if (qv.quality == SignalQuality::STALE) {
+            LOG(WARNING) << "HVAC state data stale, using last known: "
+                        << (self->current_hvac_active_ ? "active" : "inactive");
+        } else {
+            LOG(WARNING) << "HVAC state unavailable/invalid";
+        }
+    });
+
+    // Important: Engine state (can continue with stale data briefly)
+    client_->subscribe(engine_is_running_, [self](vss::types::QualifiedValue<bool> qv) {
+        using vss::types::SignalQuality;
+        if (qv.quality == SignalQuality::VALID) {
             self->handle_engine_state_change(*qv.value);
-        })
-        .subscribe(coolant_temp_, [self](vss::types::QualifiedValue<float> qv) {
-            if (!qv.is_valid()) return;
+        } else if (qv.quality == SignalQuality::STALE) {
+            LOG(WARNING) << "Engine state data stale, using last known: "
+                        << (self->current_engine_running_ ? "running" : "stopped");
+        } else {
+            LOG(WARNING) << "Engine state unavailable/invalid";
+        }
+    });
+
+    // Nice-to-have: Coolant temp (can continue with stale/old data)
+    client_->subscribe(coolant_temp_, [self](vss::types::QualifiedValue<float> qv) {
+        using vss::types::SignalQuality;
+        if (qv.quality == SignalQuality::VALID) {
             self->handle_coolant_temp_change(*qv.value);
-        })
-        .subscribe(ambient_temp_, [self](vss::types::QualifiedValue<float> qv) {
-            if (!qv.is_valid()) return;
+        } else {
+            VLOG(1) << "Coolant temp unavailable, using last value: "
+                    << self->current_coolant_temp_ << "°C";
+        }
+    });
+
+    // Nice-to-have: Ambient temp (can continue with stale/old data)
+    client_->subscribe(ambient_temp_, [self](vss::types::QualifiedValue<float> qv) {
+        using vss::types::SignalQuality;
+        if (qv.quality == SignalQuality::VALID) {
             self->handle_ambient_temp_change(*qv.value);
-        });
+        } else {
+            VLOG(1) << "Ambient temp unavailable, using last value: "
+                    << self->current_ambient_temp_ << "°C";
+        }
+    });
 
     LOG(INFO) << "Subscribed to all signals";
 }
@@ -381,18 +297,18 @@ void ClimateProtectionSystem::handle_engine_state_change(bool is_running) {
     if (is_running && !was_running) {
         LOG(INFO) << "Engine started";
         // Transition engine state machine
-        if (engine_sm_.current_state() == EngineState::STARTING) {
-            engine_sm_.trigger("engine_running");
+        if (engine_sm_->current_state() == EngineState::STARTING) {
+            engine_sm_->trigger_engine_running();
             // Also transition protection state machine
-            if (protection_sm_.current_state() == ProtectionState::BATTERY_LOW_ENGINE_START) {
-                protection_sm_.trigger("engine_started");
+            if (protection_sm_->current_state() == ProtectionState::BATTERY_LOW_ENGINE_START) {
+                protection_sm_->trigger_engine_started();
             }
         }
     } else if (!is_running && was_running) {
         LOG(INFO) << "Engine stopped";
         // Transition engine state machine
-        if (engine_sm_.current_state() == EngineState::STOPPING) {
-            engine_sm_.trigger("engine_stopped");
+        if (engine_sm_->current_state() == EngineState::STOPPING) {
+            engine_sm_->trigger_engine_stopped();
         }
     }
 }
@@ -407,10 +323,65 @@ void ClimateProtectionSystem::handle_ambient_temp_change(float temp) {
     VLOG(1) << "Ambient temperature: " << temp << "°C";
 }
 
+// ========== Signal Health Management ==========
+
+void ClimateProtectionSystem::handle_battery_voltage_loss() {
+    LOG(ERROR) << "CRITICAL SIGNAL LOSS: Battery voltage";
+    battery_voltage_available_ = false;
+    enter_safe_mode();
+}
+
+void ClimateProtectionSystem::handle_fuel_level_loss() {
+    LOG(ERROR) << "CRITICAL SIGNAL LOSS: Fuel level";
+    fuel_level_available_ = false;
+    enter_safe_mode();
+}
+
+void ClimateProtectionSystem::enter_safe_mode() {
+    system_degraded_ = true;
+
+    LOG(ERROR) << "=================================================================";
+    LOG(ERROR) << "ENTERING SAFE MODE - Critical signal(s) unavailable";
+    LOG(ERROR) << "  Battery voltage available: " << (battery_voltage_available_ ? "YES" : "NO");
+    LOG(ERROR) << "  Fuel level available: " << (fuel_level_available_ ? "YES" : "NO");
+    LOG(ERROR) << "=================================================================";
+
+    // Conservative safe actions:
+    // 1. Shut down HVAC to conserve battery (can't verify battery state)
+    if (current_hvac_active_) {
+        LOG(WARNING) << "Safe mode: Shutting down HVAC";
+        auto status = client_->set(hvac_is_active_, false);
+        if (!status.ok()) {
+            LOG(ERROR) << "Failed to shut down HVAC in safe mode: " << status;
+        }
+    }
+
+    // 2. If engine is running for charging and we started it, stop it
+    //    (can't verify fuel level or charging effectiveness)
+    if (engine_sm_->started_by_us() && current_engine_running_) {
+        LOG(WARNING) << "Safe mode: Stopping engine (cannot verify state)";
+        engine_sm_->force_stop();
+    }
+
+    // 3. Log current state
+    auto current_state = protection_sm_->current_state();
+    if (current_state != ProtectionState::EMERGENCY_SHUTDOWN) {
+        LOG(WARNING) << "Safe mode: Current protection state: " << protection_state_name(current_state);
+    }
+
+    LOG(ERROR) << "Safe mode active - system will not perform automatic protection";
+    LOG(ERROR) << "Manual intervention may be required";
+}
+
 // ========== Protection Logic ==========
 
 void ClimateProtectionSystem::check_battery_protection() {
-    auto current_state = protection_sm_.current_state();
+    // Skip protection checks if battery signal unavailable (safe mode active)
+    if (!battery_voltage_available_) {
+        return;
+    }
+
+    auto current_state = protection_sm_->current_state();
 
     // Check if battery is critically low
     if (current_battery_voltage_ < min_battery_voltage_threshold_) {
@@ -419,17 +390,16 @@ void ClimateProtectionSystem::check_battery_protection() {
             if (current_fuel_level_ > min_fuel_level_threshold_) {
                 LOG(WARNING) << "Battery critical (" << current_battery_voltage_
                              << "V < " << min_battery_voltage_threshold_ << "V), starting engine";
-                protection_sm_.trigger("battery_critical");
-                engine_sm_.trigger("start_for_charge");
+                protection_sm_->trigger_battery_critical();
             } else {
                 // Battery critical and no fuel -> emergency shutdown
                 LOG(ERROR) << "Battery and fuel both critical!";
-                protection_sm_.trigger("battery_critical");
+                protection_sm_->trigger_battery_critical();
             }
         } else if (current_state == ProtectionState::FUEL_LOW_HVAC_SHUTDOWN) {
             // Already in fuel low state, battery also critical -> emergency
             LOG(ERROR) << "Battery critical while fuel already low!";
-            protection_sm_.trigger("battery_critical");
+            protection_sm_->trigger_battery_critical();
         }
     }
 
@@ -441,14 +411,19 @@ void ClimateProtectionSystem::check_battery_protection() {
                 LOG(INFO) << "Battery recovered (" << current_battery_voltage_
                          << "V > " << safe_battery_voltage_ << "V), stopping engine";
                 stop_engine_after_charging();
-                protection_sm_.trigger("battery_recovered");
+                protection_sm_->trigger_battery_recovered();
             }
         }
     }
 }
 
 void ClimateProtectionSystem::check_fuel_protection() {
-    auto current_state = protection_sm_.current_state();
+    // Skip protection checks if fuel signal unavailable (safe mode active)
+    if (!fuel_level_available_) {
+        return;
+    }
+
+    auto current_state = protection_sm_->current_state();
 
     // Check if fuel is critically low
     if (current_fuel_level_ < min_fuel_level_threshold_) {
@@ -456,12 +431,12 @@ void ClimateProtectionSystem::check_fuel_protection() {
             current_state == ProtectionState::ENGINE_CHARGING) {
             LOG(WARNING) << "Fuel critical (" << current_fuel_level_
                          << "% < " << min_fuel_level_threshold_ << "%), shutting down HVAC";
-            protection_sm_.trigger("fuel_critical");
+            protection_sm_->trigger_fuel_critical();
 
             // If engine is running for charging, stop it
-            if (engine_sm_.current_state() == EngineState::RUNNING_FOR_CHARGE) {
+            if (engine_sm_->current_state() == EngineState::RUNNING_FOR_CHARGE) {
                 LOG(WARNING) << "Stopping engine due to low fuel";
-                engine_sm_.trigger("stop_charging");
+                engine_sm_->trigger_stop_charging();
             }
         }
     }
@@ -470,39 +445,32 @@ void ClimateProtectionSystem::check_fuel_protection() {
     if (current_fuel_level_ > min_fuel_level_threshold_ + 5.0f) {  // +5% hysteresis
         if (current_state == ProtectionState::FUEL_LOW_HVAC_SHUTDOWN) {
             LOG(INFO) << "Fuel recovered (" << current_fuel_level_ << "%)";
-            protection_sm_.trigger("fuel_recovered");
+            protection_sm_->trigger_fuel_recovered();
         }
     }
-}
-
-void ClimateProtectionSystem::check_smart_ventilation() {
-    // TODO: Implement smart ventilation logic
-    // - If ambient temp < cabin temp and HVAC cooling -> suggest opening windows
-    // - If ambient temp > cabin temp and HVAC heating -> suggest closing windows
 }
 
 // ========== Engine Management ==========
 
 void ClimateProtectionSystem::start_engine_for_charging() {
     LOG(INFO) << "Requesting engine start for battery charging";
-    engine_sm_.trigger("start_for_charge");
+    engine_sm_->trigger_start_for_charge();
 }
 
 void ClimateProtectionSystem::stop_engine_after_charging() {
     LOG(INFO) << "Requesting engine stop after charging";
-    engine_sm_.trigger("stop_charging");
+    engine_sm_->trigger_stop_charging();
 }
 
 bool ClimateProtectionSystem::should_stop_engine() {
-    // Only stop if we started it
-    if (!engine_started_by_us_) {
+    // Only stop if we started it and minimum runtime is met
+    if (!engine_sm_->started_by_us()) {
         return false;
     }
 
     // Check minimum runtime
-    auto runtime = std::chrono::steady_clock::now() - engine_start_time_;
-    if (runtime < min_engine_runtime_) {
-        auto remaining = std::chrono::duration_cast<std::chrono::seconds>(min_engine_runtime_ - runtime);
+    if (!engine_sm_->has_met_minimum_runtime()) {
+        auto remaining = engine_sm_->remaining_runtime();
         VLOG(1) << "Engine minimum runtime not met, " << remaining.count() << "s remaining";
         return false;
     }

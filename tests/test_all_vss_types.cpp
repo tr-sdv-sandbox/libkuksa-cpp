@@ -96,49 +96,49 @@ TEST(VSSTypeCompilation, AllScalarSensorTypesWithSubscriber) {
         // Bool
         {
             auto sensor = TestResolver::signal<bool>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<bool>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<bool>){});
         }
 
         // int32_t
         {
             auto sensor = TestResolver::signal<int32_t>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<int32_t>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<int32_t>){});
         }
 
         // uint32_t
         {
             auto sensor = TestResolver::signal<uint32_t>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<uint32_t>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<uint32_t>){});
         }
 
         // int64_t
         {
             auto sensor = TestResolver::signal<int64_t>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<int64_t>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<int64_t>){});
         }
 
         // uint64_t
         {
             auto sensor = TestResolver::signal<uint64_t>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<uint64_t>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<uint64_t>){});
         }
 
         // float
         {
             auto sensor = TestResolver::signal<float>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<float>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<float>){});
         }
 
         // double
         {
             auto sensor = TestResolver::signal<double>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<double>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<double>){});
         }
 
         // string
         {
             auto sensor = TestResolver::signal<std::string>("test");
-            [[maybe_unused]] auto s = subscriber->subscribe(sensor, [](vss::types::QualifiedValue<std::string>){});
+            subscriber->subscribe(sensor, [](vss::types::QualifiedValue<std::string>){});
         }
     }
 }

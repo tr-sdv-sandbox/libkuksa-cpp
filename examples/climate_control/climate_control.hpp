@@ -9,7 +9,8 @@
 #pragma once
 
 #include <kuksa_cpp/kuksa.hpp>
-#include <kuksa_cpp/state_machine/state_machine.hpp>
+#include "climate_protection_state_machine.hpp"
+#include "engine_management_state_machine.hpp"
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -17,29 +18,6 @@
 #include <atomic>
 #include <cstdlib>
 #include <glog/logging.h>
-
-// Climate protection states
-enum class ProtectionState {
-    MONITORING,                    // Normal monitoring, no intervention
-    BATTERY_LOW_ENGINE_START,      // Battery low, starting engine to charge
-    ENGINE_CHARGING,               // Engine running for battery charging
-    FUEL_LOW_HVAC_SHUTDOWN,       // Fuel critically low, shutting down HVAC
-    EMERGENCY_SHUTDOWN,            // Emergency: both battery and fuel critical
-    _Count
-};
-
-// Engine management states
-enum class EngineState {
-    STOPPED,                       // Engine not running
-    STARTING,                      // Engine start command sent
-    RUNNING_FOR_CHARGE,           // Engine running for battery charging
-    STOPPING,                      // Engine stop command sent
-    _Count
-};
-
-// State name functions for observability
-std::string protection_state_name(ProtectionState state);
-std::string engine_state_name(EngineState state);
 
 class ClimateProtectionSystem {
 public:
@@ -50,8 +28,7 @@ public:
 
 private:
     // Setup methods
-    void setup_states();
-    void setup_transitions();
+    void setup_state_machines();
     void subscribe_to_signals();
     void read_configuration();
 
@@ -63,19 +40,23 @@ private:
     void handle_coolant_temp_change(float temp);
     void handle_ambient_temp_change(float temp);
 
+    // Signal health management
+    void handle_battery_voltage_loss();
+    void handle_fuel_level_loss();
+    void enter_safe_mode();
+
     // Protection logic
     void check_battery_protection();
     void check_fuel_protection();
-    void check_smart_ventilation();
 
     // Engine management
     void start_engine_for_charging();
     void stop_engine_after_charging();
     bool should_stop_engine();
 
-    // State machines (with observability)
-    sdv::StateMachine<ProtectionState> protection_sm_;
-    sdv::StateMachine<EngineState> engine_sm_;
+    // State machines (wrapped for type-safety and observability)
+    std::unique_ptr<ClimateProtectionStateMachine> protection_sm_;
+    std::unique_ptr<EngineManagementStateMachine> engine_sm_;
 
     // KUKSA components
     std::string kuksa_url_;
@@ -90,10 +71,6 @@ private:
     kuksa::SignalHandle<float> coolant_temp_;              // Vehicle.OBD.CoolantTemperature
     kuksa::SignalHandle<float> ambient_temp_;              // Vehicle.Cabin.HVAC.AmbientAirTemperature
     kuksa::SignalHandle<float> cabin_temp_;                // Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature
-
-    // VSS 5.1 Signal handles (outputs - protection actions)
-    kuksa::SignalHandle<uint8_t> window_position_;         // Vehicle.Cabin.Door.Row1.DriverSide.Window.Position (VSS 5.1: uint8)
-    kuksa::SignalHandle<std::string> sunroof_switch_;      // Vehicle.Cabin.Sunroof.Switch
 
     // Custom signals (vss_extensions.json)
     kuksa::SignalHandle<bool> engine_start_stationary_;    // Vehicle.Private.Engine.IsStartWithoutIntentionToDrive
@@ -111,13 +88,13 @@ private:
     bool current_hvac_active_ = false;
     bool current_engine_running_ = false;
 
+    // Signal health tracking (critical signals)
+    bool battery_voltage_available_ = false;
+    bool fuel_level_available_ = false;
+    bool system_degraded_ = false;  // Set when critical signals lost
+
     // Configuration thresholds (24V system)
     float min_battery_voltage_threshold_ = 23.6f;   // Critical voltage
     float safe_battery_voltage_ = 24.8f;            // Safe/recovered voltage
     float min_fuel_level_threshold_ = 10.0f;        // Critical fuel level (%)
-
-    // Engine management
-    bool engine_started_by_us_ = false;
-    std::chrono::steady_clock::time_point engine_start_time_;
-    const std::chrono::minutes min_engine_runtime_{10};  // Minimum 10 minutes
 };

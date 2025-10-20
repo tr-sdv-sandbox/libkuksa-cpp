@@ -85,10 +85,9 @@ TEST_F(KuksaCommunicationTest, ProviderConnectivity) {
     // Create unified client with one actuator handler
     auto client = *Client::create(getKuksaAddress());
 
-    auto serve_status = client->serve_actuator(actuator, [](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(actuator, [](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Dummy handler called with target: " << target;
     });
-    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
     EXPECT_FALSE(client->is_running()) << "Client should not be running before start()";
 
     auto start_status = client->start();
@@ -126,13 +125,12 @@ TEST_F(KuksaCommunicationTest, ActuatorClientPattern) {
     // Create unified client with handler
     auto client = *Client::create(getKuksaAddress());
 
-    auto serve_status = client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client received actuation for " << handle.path()
                   << " with value: " << target;
         actuation_value = target;
         actuation_received = true;
     });
-    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // Start client
     auto start_status = client->start();
@@ -214,7 +212,7 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
     std::atomic<int> update_count(0);
     std::atomic<float> received_value(0);
 
-    auto subscribe_status = client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         LOG(INFO) << "Subscription received update: "
                   << (qvalue.is_valid() ? std::to_string(*qvalue.value) : "NOT_VALID")
                   << " (count: " << update_count.load() + 1 << ")";
@@ -225,7 +223,6 @@ TEST_F(KuksaCommunicationTest, SensorSubscription) {
             LOG(INFO) << "Skipping invalid value";
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     // Start subscriptions
     auto start_status = client->start();
@@ -298,29 +295,26 @@ TEST_F(KuksaCommunicationTest, MultipleSubscriptions) {
     // Set up multiple subscriptions
     std::atomic<int> updates_received(0);
 
-    auto subscribe_status1 = subscriber->subscribe(sensor1, [&](vss::types::QualifiedValue<float> qvalue) {
+    subscriber->subscribe(sensor1, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor1 update: " << *qvalue.value;
             updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to sensor1: " << subscribe_status1;
 
-    auto subscribe_status2 = subscriber->subscribe(sensor2, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    subscriber->subscribe(sensor2, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor2 update: " << *qvalue.value;
             updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to sensor2: " << subscribe_status2;
 
-    auto subscribe_status3 = subscriber->subscribe(sensor3, [&](vss::types::QualifiedValue<bool> qvalue) {
+    subscriber->subscribe(sensor3, [&](vss::types::QualifiedValue<bool> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Sensor3 update: " << *qvalue.value;
             updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status3.ok()) << "Failed to subscribe to sensor3: " << subscribe_status3;
 
     auto start_status = subscriber->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
@@ -359,7 +353,7 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
     auto client = *Client::create(getKuksaAddress());
     Client* client_ptr = client.get();
 
-    auto serve_status2 = client->serve_actuator(actuator_handle, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(actuator_handle, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         LOG(INFO) << "Client simulating hardware delay";
         std::this_thread::sleep_for(200ms);
 
@@ -373,10 +367,9 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
 
         actuation_promise.set_value();
     });
-    ASSERT_TRUE(serve_status2.ok()) << "Failed to register actuator: " << serve_status2;
 
-    auto serve_status = client->start();
-    ASSERT_TRUE(serve_status.ok()) << "Failed to start client: " << serve_status;
+    auto start_status = client->start();
+    ASSERT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
 
     // Wait for client to be ready
     auto client_ready_status = client->wait_until_ready(std::chrono::milliseconds(5000));
@@ -397,21 +390,20 @@ TEST_F(KuksaCommunicationTest, ActuatorActualValueFlow) {
     std::atomic<bool> actual_updated(false);
     std::atomic<int32_t> actual_value(0);
 
-    auto subscribe_status = subscriber->subscribe(actuator_ro, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    subscriber->subscribe(actuator_ro, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Actual value updated to: " << *qvalue.value;
             actual_value = *qvalue.value;
             actual_updated = true;
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
-    auto start_status = subscriber->start();
-    ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
+    auto subscriber_start_status = subscriber->start();
+    ASSERT_TRUE(subscriber_start_status.ok()) << "Failed to start subscriber: " << subscriber_start_status;
 
     // Wait for subscriber to be ready
-    auto ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
-    ASSERT_TRUE(ready_status.ok()) << "Subscriber not ready: " << ready_status;
+    auto subscriber_ready_status = subscriber->wait_until_ready(std::chrono::milliseconds(5000));
+    ASSERT_TRUE(subscriber_ready_status.ok()) << "Subscriber not ready: " << subscriber_ready_status;
 
     // Send actuation command using Client
     ASSERT_TRUE(accessor->set(actuator_handle, 123).ok());
@@ -460,7 +452,7 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     std::vector<int32_t> received_values;
     std::mutex values_mutex;
 
-    auto subscribe_status = subscriber->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    subscriber->subscribe(actuator, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         int count = subscription_updates.fetch_add(1) + 1;
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscription callback #" << count << ": value = " << *qvalue.value;
@@ -470,7 +462,6 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
             LOG(INFO) << "Subscription callback #" << count << ": NOT_VALID";
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     auto start_status = subscriber->start();
     ASSERT_TRUE(start_status.ok()) << "Failed to start subscriber: " << start_status;
@@ -492,14 +483,13 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     auto client = *Client::create(getKuksaAddress());
     Client* client_ptr = client.get();
 
-    auto serve_status3 = client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    client->serve_actuator(actuator_rw, [&, client_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         int count = actuation_count.fetch_add(1) + 1;
         LOG(INFO) << "Client1 received actuation #" << count << " with value: " << target;
 
         auto status = client_ptr->publish(handle, target);
         LOG(INFO) << "Client1 published actual value: " << target << ", status: " << status;
     });
-    ASSERT_TRUE(serve_status3.ok()) << "Failed to register actuator: " << serve_status3;
 
     auto start_status2 = client->start();
     ASSERT_TRUE(start_status2.ok()) << "Failed to start client: " << start_status2;
@@ -569,14 +559,13 @@ TEST_F(KuksaCommunicationTest, ProviderRestartWithActiveSubscription) {
     auto client2 = *Client::create(getKuksaAddress());
     Client* client2_ptr = client2.get();
 
-    auto serve_status4 = client2->serve_actuator(actuator_rw, [&, client2_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
+    client2->serve_actuator(actuator_rw, [&, client2_ptr](int32_t target, const SignalHandle<int32_t>& handle) {
         int count = actuation_count2.fetch_add(1) + 1;
         LOG(INFO) << "Client2 received actuation #" << count << " with value: " << target;
 
         auto status = client2_ptr->publish(handle, target);
         LOG(INFO) << "Client2 published actual value: " << target << ", status: " << status;
     });
-    ASSERT_TRUE(serve_status4.ok()) << "Failed to register actuator: " << serve_status4;
 
     auto start_status3 = client2->start();
     ASSERT_TRUE(start_status3.ok()) << "Failed to start client2: " << start_status3;
@@ -702,7 +691,7 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
     std::set<int32_t> unique_values_received;
     std::mutex values_mutex;
 
-    auto subscribe_status = subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<int32_t> qvalue) {
+    subscriber->subscribe(sensor, [&](vss::types::QualifiedValue<int32_t> qvalue) {
         if (qvalue.is_valid()) {
             int count = updates_received.fetch_add(1) + 1;
             LOG(INFO) << "Received update #" << count << ": " << *qvalue.value;
@@ -718,7 +707,6 @@ TEST_F(KuksaCommunicationTest, ConcurrentOperations) {
             }
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     // Wait a bit before starting subscriber to ensure initial value is in KUKSA
     std::this_thread::sleep_for(100ms);
