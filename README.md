@@ -1,245 +1,211 @@
 # libkuksa-cpp
 
-C++ library for interacting with KUKSA.val databroker using the Vehicle Signal Specification (VSS).
+Modern C++ library for interacting with KUKSA.val databroker using the Vehicle Signal Specification (VSS).
 
 ## Features
 
-- Type-safe signal handles with compile-time checking
-- Single connection for all operations
-- Support for all VSS data types including arrays
-- Automatic RPC routing based on signal class
-- Thread-safe operations
-
-## Requirements
-
-- C++17 or later
-- CMake 3.16+
-- gRPC and protobuf
-- Google glog
-- KUKSA.val databroker v2
+- **Type-safe signal handles** with compile-time type checking
+- **Signal quality awareness** - Handle VALID, INVALID, NOT_AVAILABLE, STALE states
+- **VSS 5.1 support** with transparent type mapping (int8/16, uint8/16)
+- **Unified client** - Single connection for all operations
+- **Batch operations** - Fluent API for resolving and reading multiple signals
+- **State machine library** - Observable state machines for application logic
+- **Thread-safe** - Safe concurrent access from multiple threads
 
 ## Quick Start
 
 ```cpp
 #include <kuksa_cpp/kuksa.hpp>
-#include <glog/logging.h>
-
-using namespace kuksa;
 
 int main() {
-    // Step 1: Resolve signal handles
-    auto resolver = std::move(*Resolver::create("localhost:55555"));
-    auto speed = *resolver->get<float>("Vehicle.Speed");
-    auto door = *resolver->get<bool>("Vehicle.Cabin.Door.Row1.Left.IsLocked");
+    // 1. Resolve signals
+    auto resolver = std::move(*kuksa::Resolver::create("localhost:55555"));
 
-    // Step 2: Create client
-    auto client = std::move(*Client::create("localhost:55555"));
+    kuksa::SignalHandle<float> speed;
+    kuksa::SignalHandle<bool> door_locked;
 
-    // Step 3: Subscribe to updates
-    client->subscribe(speed, [](std::optional<float> value) {
-        if (value) LOG(INFO) << "Speed: " << *value << " km/h";
+    resolver->signals()
+        .add(speed, "Vehicle.Speed")
+        .add(door_locked, "Vehicle.Cabin.Door.Row1.Left.IsLocked")
+        .resolve();
+
+    // 2. Create client
+    auto client = std::make_shared<kuksa::Client>(
+        std::move(*kuksa::Client::create("localhost:55555"))
+    );
+
+    // 3. Subscribe with quality handling
+    client->subscribe(speed, [](vss::types::QualifiedValue<float> qv) {
+        if (qv.quality == vss::types::SignalQuality::VALID) {
+            LOG(INFO) << "Speed: " << *qv.value << " km/h";
+        }
     });
 
-    // Step 4: Start client for async operations
+    // 4. Start and read/write
     client->start();
     client->wait_until_ready(std::chrono::seconds(5));
 
-    // Step 5: Read and write values
-    auto current = client->get(speed);
-    client->set(door, true);  // Auto-routes to Actuate() for actuators
-    client->publish(speed, 120.5f);  // PublishValue() for sensors
+    auto current_speed = client->get_value(speed);
+    client->set(door_locked, true);
 
     return 0;
 }
 ```
 
-## API Overview
+## Documentation
 
-### Resolver
+- **[USAGE.md](USAGE.md)** - Complete API reference and usage guide
+- **[examples/climate_control/](examples/climate_control/)** - Comprehensive example with state machines
+- **[TESTING.md](TESTING.md)** - Testing library documentation
 
-Query signal metadata and create typed handles:
+## Key Concepts
 
-```cpp
-auto resolver = std::move(*Resolver::create("localhost:55555"));
+### Signal Quality
 
-// Get handles for any signal type
-auto sensor = *resolver->get<float>("Vehicle.Speed");
-auto actuator = *resolver->get<bool>("Vehicle.Door.IsLocked");
-auto attribute = *resolver->get<std::string>("Vehicle.VIN");
-```
-
-### Client
-
-Unified client for all operations:
+All subscriptions include quality metadata - critical for safety systems:
 
 ```cpp
-auto client = std::move(*Client::create("localhost:55555"));
-
-// Synchronous operations (work immediately)
-client->get(handle);           // Read current value
-client->set(handle, value);    // Write (auto-routes to correct RPC)
-
-// Asynchronous operations (require start())
-client->subscribe(handle, callback);      // Receive updates
-client->publish(handle, value);           // Publish sensor values
-client->serve_actuator(handle, handler);  // Handle actuation requests
-
-// Start async operations
-client->start();
-client->wait_until_ready(std::chrono::seconds(5));
-```
-
-### Signal Handles
-
-All signals use `SignalHandle<T>`:
-
-```cpp
-// Same handle type for all signal classes
-auto speed = resolver->get<float>("Vehicle.Speed");        // Sensor
-auto door = resolver->get<bool>("Vehicle.Door.IsLocked");  // Actuator
-auto vin = resolver->get<std::string>("Vehicle.VIN");      // Attribute
-
-// Operation determines behavior
-client->get(*speed);              // Read
-client->set(*door, true);         // Command actuator
-client->publish(*speed, 100.0f);  // Publish sensor
-```
-
-## Supported Data Types
-
-**Scalars**: `bool`, `int32_t`, `uint32_t`, `int64_t`, `uint64_t`, `float`, `double`, `std::string`
-
-**Arrays**: `std::vector<T>` for all scalar types
-
-## Threading Model
-
-### Resolver
-- No internal threads
-- Synchronous operations
-- Thread-safe
-
-### Client
-- Internal threads for streaming operations
-- Synchronous operations (`get`, `set`) work immediately
-- Asynchronous operations (`subscribe`, `publish`, `serve_actuator`) require `start()`
-- Thread-safe
-- **Important**: Callbacks run on gRPC threads - do not block or call `publish()` directly
-
-### Handling Long Operations
-
-Queue work from callbacks to separate threads:
-
-```cpp
-std::queue<float> work_queue;
-std::mutex mutex;
-
-client->subscribe(sensor, [&](std::optional<float> value) {
-    // Fast - just queue the work
-    std::lock_guard lock(mutex);
-    work_queue.push(*value);
-});
-
-// Process in separate thread
-std::thread worker([&]() {
-    while (running) {
-        // Get work and process
-        float value = get_from_queue();
-        process_value(value);  // Safe to do long operations here
+client->subscribe(battery_voltage, [](vss::types::QualifiedValue<float> qv) {
+    switch (qv.quality) {
+        case SignalQuality::VALID:      // Use value
+        case SignalQuality::INVALID:    // Sensor malfunction
+        case SignalQuality::NOT_AVAILABLE:  // Signal lost
+        case SignalQuality::STALE:      // Data not updating
     }
 });
 ```
 
-## Actuator Pattern
-
-Register handler and process in separate thread:
+### Batch Operations
 
 ```cpp
-auto client_shared = std::shared_ptr<Client>(std::move(*Client::create("localhost:55555")));
+// Resolve multiple signals with error aggregation
+auto status = resolver->signals()
+    .add(battery, "Vehicle.LowVoltageBattery.CurrentVoltage")
+    .add(fuel, "Vehicle.OBD.FuelLevel")
+    .add(hvac, "Vehicle.Cabin.HVAC.IsAirConditioningActive")
+    .resolve();
 
-client_shared->serve_actuator(door, [client_weak = std::weak_ptr<Client>(client_shared)](
-        bool target, const SignalHandle<bool>& handle) {
-    // Queue work - DO NOT call publish() here (will cause gRPC errors)
-    queue_work(handle, target);
-});
-
-// Worker thread publishes actual values
-std::thread worker([client_shared]() {
-    while (running) {
-        auto [handle, value] = get_work();
-        client_shared->publish(handle, value);  // Safe - different thread
-    }
-});
-
-client_shared->start();
+// Read multiple values with structured binding
+auto [voltage, fuel_level] = client->get_values(battery, fuel)
+    .value_or(std::tuple{24.0f, 50.0f});
 ```
 
-## Error Handling
+### VSS 5.1 Type Mapping
 
-All operations return `Result<T>` or `absl::Status`:
+Transparent mapping for VSS logical types:
 
-```cpp
-// Connection failures
-auto resolver = Resolver::create("invalid:12345");
-if (!resolver.ok()) {
-    LOG(ERROR) << "Failed: " << resolver.status();
-}
-
-// Signal resolution
-auto handle = resolver->get<float>("Invalid.Signal");
-if (!handle.ok()) {
-    LOG(ERROR) << "Signal not found: " << handle.status();
-}
-
-// Read operations (two-layer)
-auto result = client->get(handle);
-if (!result.ok()) {
-    LOG(ERROR) << "Get failed: " << result.status();
-} else if (!result->has_value()) {
-    LOG(INFO) << "Signal has no value (NONE)";
-} else {
-    LOG(INFO) << "Value: " << **result;
-}
-```
+| VSS Type | C++ Type | Notes |
+|----------|----------|-------|
+| `int8`, `int16` | `int8_t`, `int16_t` | Maps to int32 in protobuf |
+| `uint8`, `uint16` | `uint8_t`, `uint16_t` | Maps to uint32 in protobuf |
+| `float`, `double`, `bool`, `string` | Direct mapping | |
+| Arrays | `std::vector<T>` | For any scalar type |
 
 ## Building
 
-```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install -y build-essential cmake \
-    libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc libgoogle-glog-dev
+### Dependencies
 
-# Build
+**libvss-types** (required):
+```bash
+# Clone and install libvss-types
+git clone https://github.com/tr-sdv-sandbox/libvss-types.git
+cd libvss-types
+mkdir build && cd build
+cmake .. && make -j$(nproc)
+sudo make install
+cd ../..
+```
+
+Or place libvss-types in parent directory for development:
+```
+tr-sdv-sandbox/
+├── libvss-types/
+└── libkuksa-cpp/
+```
+
+**Other dependencies**:
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y build-essential cmake \
+    libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
+    libgoogle-glog-dev libabsl-dev libyaml-cpp-dev
+```
+
+### Compile
+
+```bash
 mkdir build && cd build
 cmake .. -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON
-make -j$(nproc)
-
-# Run tests
-ctest
+cmake --build . -j$(nproc)
+ctest --output-on-failure
 ```
+
+## Examples
+
+### Climate Control Protection System
+
+Full-featured example demonstrating:
+- Wrapped state machines for protection and engine management
+- Signal quality handling for safety-critical systems
+- Batch operations and configuration reads
+- Automatic protection logic (battery charging, HVAC shutdown)
+
+```bash
+cd build
+./examples/climate_control
+```
+
+See [examples/climate_control/README.md](examples/climate_control/README.md) for details.
 
 ## CMake Integration
 
 ```cmake
-find_package(Protobuf REQUIRED)
+find_package(absl REQUIRED)
 find_package(gRPC REQUIRED)
 find_package(glog REQUIRED)
 
 add_subdirectory(libkuksa-cpp)
 
 target_link_libraries(your_app
-    kuksa
+    kuksa_cpp
     glog::glog
+    absl::status
 )
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│              Your Application                    │
+│                                                  │
+│  Resolver ──▶ SignalHandle<T> ──▶ Client       │
+│                                    │             │
+│                                    │ gRPC        │
+└────────────────────────────────────┼─────────────┘
+                                     ▼
+                        ┌────────────────────────┐
+                        │  KUKSA.val Databroker  │
+                        │  (VSS metadata + data) │
+                        └────────────────────────┘
 ```
 
 ## Additional Components
 
-### State Machine (`sdv::state_machine`)
-Generic hierarchical state machine used internally for connection management. Can be used independently.
+### State Machine Library
+Generic hierarchical state machines with observability. Used internally for connection management, available for application logic. See wrapped state machine pattern in climate control example.
 
-### Testing Library (`sdv::testing`)
-YAML-based testing framework with Google Test integration. See `TESTING.md` for details.
+### Testing Library
+YAML-based declarative testing framework with Google Test integration. See [TESTING.md](TESTING.md).
+
+### VSS Types Library
+Standalone library (`libvss-types`) providing `QualifiedValue<T>`, `SignalQuality`, and data type enumerations.
 
 ## License
 
 Apache License 2.0
+
+## Resources
+
+- **KUKSA.val**: https://github.com/eclipse-kuksa/kuksa-databroker
+- **VSS Specification**: https://covesa.github.io/vehicle_signal_specification/

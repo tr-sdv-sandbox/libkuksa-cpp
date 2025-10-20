@@ -44,18 +44,24 @@ endif()
 
 find_package(yaml-cpp REQUIRED)
 
-# Find or fetch libvss-types
+# Find libvss-types (shared dependency)
+# Try to find it first to avoid it being included twice if both
+# libkuksa-cpp and other projects in the workspace try to include it
 if(NOT TARGET vss::types)
     find_package(vss-types QUIET)
     if(NOT vss-types_FOUND)
-        message(STATUS "vss-types not found, will fetch from GitHub")
-        include(FetchContent)
-        FetchContent_Declare(
-            vss-types
-            GIT_REPOSITORY https://github.com/tr-sdv-sandbox/libvss-types.git
-            GIT_TAG v0.0.1
-        )
-        FetchContent_MakeAvailable(vss-types)
+        # Check parent directory for development
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../libvss-types/CMakeLists.txt")
+            message(STATUS "Found libvss-types in parent directory")
+            add_subdirectory(../libvss-types ${CMAKE_BINARY_DIR}/libvss-types)
+        else()
+            message(FATAL_ERROR
+                "libvss-types not found. Please either:\n"
+                "  1. Install it system-wide (sudo make install from libvss-types)\n"
+                "  2. Place it in parent directory: ../libvss-types\n"
+                "  3. Set CMAKE_PREFIX_PATH to point to libvss-types install location"
+            )
+        endif()
     endif()
 endif()
 

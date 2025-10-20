@@ -39,6 +39,21 @@ jobs:
             libgtest-dev \
             pkg-config
 
+      - name: Build and install libvss-types
+        run: |
+          mkdir -p /tmp/libvss-types
+          cd /tmp/libvss-types
+          git clone --depth 1 --branch v0.0.2 https://github.com/tr-sdv-sandbox/libvss-types.git .
+          mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+            -DVSS_TYPES_BUILD_TESTS=OFF \
+            -DVSS_TYPES_BUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            ..
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
       - name: Configure
         run: |
           mkdir -p build
@@ -112,6 +127,7 @@ jobs:
         run: |
           cd build
           sudo make install
+          sudo ldconfig
 
       - name: Verify installation
         run: |
