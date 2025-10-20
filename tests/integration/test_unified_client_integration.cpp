@@ -62,7 +62,7 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
     std::atomic<bool> actuator_called{false};
     std::atomic<bool> last_target{false};
 
-    auto serve_status = client->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
+    client->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Actuator callback: target=" << target;
         last_target = target;
         actuator_called = true;
@@ -70,7 +70,6 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
         // NOTE: Don't call publish from inside the callback - it runs on gRPC thread
         // In real code, queue to a state machine thread that will publish later
     });
-    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // 2. Subscribe to a sensor
     auto temp_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
@@ -80,14 +79,13 @@ TEST_F(UnifiedClientIntegrationTest, BasicUnifiedClient) {
     std::atomic<float> last_temp{0.0f};
     std::atomic<bool> subscription_called{false};
 
-    auto subscribe_status = client->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    client->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Subscription callback: temp=" << *qvalue.value;
             last_temp = *qvalue.value;
             subscription_called = true;
         }
     });
-    ASSERT_TRUE(subscribe_status.ok()) << "Failed to subscribe: " << subscribe_status;
 
     // 3. Get RW handle for sensor we'll publish to (no registration needed!)
     auto temp_rw_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
@@ -157,21 +155,19 @@ TEST_F(UnifiedClientIntegrationTest, BatchPublishing) {
     std::atomic<float> last_speed{0.0f};
     std::atomic<uint32_t> last_rpm{0};
 
-    auto subscribe_status1 = subscriber->subscribe(speed, [&](vss::types::QualifiedValue<float> qvalue) {
+    subscriber->subscribe(speed, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             last_speed = *qvalue.value;
             updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status1.ok()) << "Failed to subscribe to speed: " << subscribe_status1;
 
-    auto subscribe_status2 = subscriber->subscribe(rpm, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
+    subscriber->subscribe(rpm, [&](vss::types::QualifiedValue<uint32_t> qvalue) {
         if (qvalue.is_valid()) {
             last_rpm = *qvalue.value;
             updates_received++;
         }
     });
-    ASSERT_TRUE(subscribe_status2.ok()) << "Failed to subscribe to rpm: " << subscribe_status2;
 
     auto sub_start_status = subscriber->start();
     ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
@@ -260,14 +256,13 @@ TEST_F(UnifiedClientIntegrationTest, ProviderRestartResilience) {
     auto create_client = [&]() {
         auto client = *Client::create(getKuksaAddress());
 
-        auto serve_status = client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+        client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
             LOG(INFO) << "Actuator called with: " << target;
             last_value = target;
             actuator_call_count++;
 
             // NOTE: Don't publish from callback - runs on gRPC thread
         });
-        EXPECT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
         auto start_status = client->start();
         EXPECT_TRUE(start_status.ok()) << "Failed to start client: " << start_status;
@@ -344,23 +339,21 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
     std::atomic<float> current_temp{0.0f};
 
     // Subscribe to temperature
-    auto hvac_subscribe_status = hvac_controller->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    hvac_controller->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "HVAC: Temperature reading: " << *qvalue.value;
             current_temp = *qvalue.value;
         }
     });
-    ASSERT_TRUE(hvac_subscribe_status.ok()) << "Failed to subscribe: " << hvac_subscribe_status;
 
     // Serve HVAC actuator
-    auto hvac_serve_status = hvac_controller->serve_actuator(hvac_actuator, [&](bool cooling_target, const SignalHandle<bool>& handle) {
+    hvac_controller->serve_actuator(hvac_actuator, [&](bool cooling_target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "HVAC: Received cooling command: " << cooling_target;
         hvac_cooling_actual = cooling_target;
 
         // NOTE: Don't publish from callback - runs on gRPC thread
         // In real code, queue to state machine
     });
-    ASSERT_TRUE(hvac_serve_status.ok()) << "Failed to register HVAC actuator: " << hvac_serve_status;
 
     auto hvac_start_status = hvac_controller->start();
     ASSERT_TRUE(hvac_start_status.ok()) << "Failed to start HVAC controller: " << hvac_start_status;
@@ -379,7 +372,7 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
     std::atomic<bool> should_cool{false};
     std::atomic<bool> saw_low_temp{false};  // Track if we've seen expected low temp
 
-    auto monitor_subscribe_status = temp_monitor->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    temp_monitor->subscribe(temp_sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             // Track if we've seen the expected low temperature (20°C)
             if (*qvalue.value >= 19.0f && *qvalue.value <= 21.0f) {
@@ -393,7 +386,6 @@ TEST_F(UnifiedClientIntegrationTest, SensorFeederActuatorCoordination) {
             }
         }
     });
-    ASSERT_TRUE(monitor_subscribe_status.ok()) << "Failed to subscribe: " << monitor_subscribe_status;
 
     auto monitor_start_status = temp_monitor->start();
     ASSERT_TRUE(monitor_start_status.ok()) << "Failed to start temp monitor: " << monitor_start_status;
@@ -454,11 +446,10 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
 
     std::atomic<int> actuation_count{0};
 
-    auto act_serve_status = actuator_client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
+    actuator_client->serve_actuator(actuator, [&](int32_t target, const SignalHandle<int32_t>& handle) {
         actuation_count++;
         // NOTE: Don't publish from callback
     });
-    ASSERT_TRUE(act_serve_status.ok()) << "Failed to register actuator: " << act_serve_status;
 
     // Actuator client subscribes to sensor
     auto sensor_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
@@ -467,12 +458,11 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
 
     std::atomic<int> subscription_count{0};
 
-    auto act_subscribe_status = actuator_client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
+    actuator_client->subscribe(sensor, [&](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             subscription_count++;
         }
     });
-    ASSERT_TRUE(act_subscribe_status.ok()) << "Failed to subscribe: " << act_subscribe_status;
 
     auto act_start_status = actuator_client->start();
     ASSERT_TRUE(act_start_status.ok()) << "Failed to start actuator client: " << act_start_status;
@@ -591,7 +581,7 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
     std::atomic<bool> worker_running{true};
 
     // Register actuator callback (runs on gRPC thread)
-    auto door_serve_status = door_controller->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
+    door_controller->serve_actuator(door_lock, [&](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Door controller: Received lock command: " << target;
 
         // Queue work instead of publishing directly
@@ -599,7 +589,6 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
         work_queue.push({handle, target});
         work_cv.notify_one();
     });
-    ASSERT_TRUE(door_serve_status.ok()) << "Failed to register door actuator: " << door_serve_status;
 
     auto door_start_status = door_controller->start();
     ASSERT_TRUE(door_start_status.ok()) << "Failed to start door controller: " << door_start_status;
@@ -639,14 +628,13 @@ TEST_F(UnifiedClientIntegrationTest, ActuatorFeedbackLoop) {
     std::atomic<int> observation_count{0};
     std::atomic<bool> last_observed_value{false};
 
-    auto observer_subscribe_status = observer->subscribe(door_lock, [&](vss::types::QualifiedValue<bool> qvalue) {
+    observer->subscribe(door_lock, [&](vss::types::QualifiedValue<bool> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Observer: Saw door lock actual value: " << *qvalue.value;
             last_observed_value = *qvalue.value;
             observation_count++;
         }
     });
-    ASSERT_TRUE(observer_subscribe_status.ok()) << "Failed to subscribe: " << observer_subscribe_status;
 
     auto observer_start_status = observer->start();
     ASSERT_TRUE(observer_start_status.ok()) << "Failed to start observer: " << observer_start_status;

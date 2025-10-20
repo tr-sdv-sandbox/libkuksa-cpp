@@ -24,6 +24,18 @@ target_link_libraries(unified_client_simple
         glog::glog
 )
 
+# Climate control example (VSS 5.1)
+add_executable(climate_control
+    climate_control/main.cpp
+    climate_control/climate_control.cpp
+)
+target_link_libraries(climate_control
+    PRIVATE
+        kuksa
+        sdv::state_machine
+        glog::glog
+)
+
 # Standalone test runner example (requires testing library)
 if(WITH_TESTING)
     add_subdirectory(standalone_test_runner)

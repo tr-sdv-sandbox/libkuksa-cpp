@@ -6,6 +6,8 @@
 #include <kuksa_cpp/resolver.hpp>
 #include <grpcpp/grpcpp.h>
 #include <glog/logging.h>
+#include <absl/strings/str_format.h>
+#include <absl/strings/str_join.h>
 #include <mutex>
 #include <unordered_map>
 
@@ -257,6 +259,10 @@ Result<std::unique_ptr<Resolver>> Resolver::create(
 
 // Typed handles (scalar types)
 template Result<SignalHandle<bool>> Resolver::get<bool>(const std::string&);
+template Result<SignalHandle<int8_t>> Resolver::get<int8_t>(const std::string&);
+template Result<SignalHandle<uint8_t>> Resolver::get<uint8_t>(const std::string&);
+template Result<SignalHandle<int16_t>> Resolver::get<int16_t>(const std::string&);
+template Result<SignalHandle<uint16_t>> Resolver::get<uint16_t>(const std::string&);
 template Result<SignalHandle<int32_t>> Resolver::get<int32_t>(const std::string&);
 template Result<SignalHandle<uint32_t>> Resolver::get<uint32_t>(const std::string&);
 template Result<SignalHandle<int64_t>> Resolver::get<int64_t>(const std::string&);
@@ -267,6 +273,10 @@ template Result<SignalHandle<std::string>> Resolver::get<std::string>(const std:
 
 // Typed handles (array types)
 template Result<SignalHandle<std::vector<bool>>> Resolver::get<std::vector<bool>>(const std::string&);
+template Result<SignalHandle<std::vector<int8_t>>> Resolver::get<std::vector<int8_t>>(const std::string&);
+template Result<SignalHandle<std::vector<uint8_t>>> Resolver::get<std::vector<uint8_t>>(const std::string&);
+template Result<SignalHandle<std::vector<int16_t>>> Resolver::get<std::vector<int16_t>>(const std::string&);
+template Result<SignalHandle<std::vector<uint16_t>>> Resolver::get<std::vector<uint16_t>>(const std::string&);
 template Result<SignalHandle<std::vector<int32_t>>> Resolver::get<std::vector<int32_t>>(const std::string&);
 template Result<SignalHandle<std::vector<uint32_t>>> Resolver::get<std::vector<uint32_t>>(const std::string&);
 template Result<SignalHandle<std::vector<int64_t>>> Resolver::get<std::vector<int64_t>>(const std::string&);
@@ -286,6 +296,31 @@ Result<SignalHandle<T>> Resolver::get(const std::string& path) {
 
 Result<std::shared_ptr<DynamicSignalHandle>> Resolver::get_dynamic(const std::string& path) {
     return static_cast<VSSResolverImpl*>(this)->get_dynamic_impl(path);
+}
+
+// ============================================================================
+// SignalSetBuilder Implementation
+// ============================================================================
+
+Status SignalSetBuilder::resolve() {
+    std::vector<std::string> errors;
+
+    for (const auto& spec : signal_specs_) {
+        auto status = spec.resolver();
+        if (!status.ok()) {
+            errors.push_back(absl::StrFormat("  - %s: %s", spec.path, status.message()));
+        }
+    }
+
+    if (!errors.empty()) {
+        return absl::FailedPreconditionError(
+            absl::StrFormat("Failed to resolve %d signal(s):\n%s",
+                           errors.size(),
+                           absl::StrJoin(errors, "\n"))
+        );
+    }
+
+    return absl::OkStatus();
 }
 
 } // namespace kuksa

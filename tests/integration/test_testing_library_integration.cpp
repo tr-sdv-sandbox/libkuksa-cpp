@@ -221,7 +221,7 @@ TEST_F(TestingLibraryIntegrationTest, ActuatorWithProviderFullFlow) {
     Client* client_ptr = client.get();
 
     // Register handler for actuation requests BEFORE starting
-    auto serve_status = client->serve_actuator(actuator, [&, client_ptr](float target, const SignalHandle<float>& handle) {
+    client->serve_actuator(actuator, [&, client_ptr](float target, const SignalHandle<float>& handle) {
         LOG(INFO) << "Client received actuation request: target=" << target;
         received_target = target;
         callback_count++;
@@ -235,7 +235,6 @@ TEST_F(TestingLibraryIntegrationTest, ActuatorWithProviderFullFlow) {
             LOG(ERROR) << "Failed to publish actual: " << status;
         }
     });
-    ASSERT_TRUE(serve_status.ok()) << "Failed to register actuator: " << serve_status;
 
     // Start client (must be after serve_actuator())
     auto start_status = client->start();

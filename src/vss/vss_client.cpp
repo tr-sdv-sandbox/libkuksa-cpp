@@ -10,6 +10,7 @@
 #include <kuksa_cpp/client.hpp>
 #include <kuksa_cpp/error.hpp>
 #include <kuksa_cpp/connection_state_machine.hpp>
+#include <kuksa_cpp/type_mapping.hpp>
 #include <grpcpp/grpcpp.h>
 #include <glog/logging.h>
 #include <absl/strings/str_format.h>
@@ -18,6 +19,7 @@
 #include <mutex>
 #include <atomic>
 #include <map>
+#include <limits>
 
 // Include KUKSA v2 protobuf definitions
 #include "kuksa/val/v2/types.pb.h"
@@ -52,7 +54,33 @@ namespace kuksa {
 // Helper functions (shared by both streams)
 // ============================================================================
 
+/**
+ * @brief Safely narrow a value from physical type to logical type with range checking
+ *
+ * Used when converting from KUKSA protobuf types (int32/uint32) to VSS logical types
+ * (int8/uint8/int16/uint16). Validates that the value fits in the target range.
+ *
+ * @tparam LogicalT Target VSS logical type (e.g., uint8_t)
+ * @tparam PhysicalT Source KUKSA physical type (e.g., uint32_t)
+ * @param value Value to narrow
+ * @return Result<LogicalT> Success with narrowed value, or error if out of range
+ */
+template<typename LogicalT, typename PhysicalT>
+static Result<LogicalT> narrow_cast(PhysicalT value) {
+    if (value < std::numeric_limits<LogicalT>::min() ||
+        value > std::numeric_limits<LogicalT>::max()) {
+        return absl::OutOfRangeError(
+            absl::StrFormat("Value %d out of range for type [%d, %d]",
+                           static_cast<int64_t>(value),
+                           static_cast<int64_t>(std::numeric_limits<LogicalT>::min()),
+                           static_cast<int64_t>(std::numeric_limits<LogicalT>::max()))
+        );
+    }
+    return static_cast<LogicalT>(value);
+}
+
 // Convert vss::types::Value to protobuf Value
+// Handles widening conversions for int8/uint8/int16/uint16 -> int32/uint32
 static kuksa::val::v2::Value to_proto_value(const vss::types::Value& value) {
     kuksa::val::v2::Value proto_value;
 
@@ -63,7 +91,19 @@ static kuksa::val::v2::Value to_proto_value(const vss::types::Value& value) {
             // Empty value - don't set anything in protobuf
         } else if constexpr (std::is_same_v<T, bool>) {
             proto_value.set_bool_(v);
-        } else if constexpr (std::is_same_v<T, int32_t>) {
+        }
+        // Narrowing scalar types (widen to protobuf physical type)
+        else if constexpr (std::is_same_v<T, int8_t>) {
+            proto_value.set_int32(static_cast<int32_t>(v));  // Widen
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            proto_value.set_uint32(static_cast<uint32_t>(v));  // Widen
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            proto_value.set_int32(static_cast<int32_t>(v));  // Widen
+        } else if constexpr (std::is_same_v<T, uint16_t>) {
+            proto_value.set_uint32(static_cast<uint32_t>(v));  // Widen
+        }
+        // Direct scalar types (no conversion)
+        else if constexpr (std::is_same_v<T, int32_t>) {
             proto_value.set_int32(v);
         } else if constexpr (std::is_same_v<T, uint32_t>) {
             proto_value.set_uint32(v);
@@ -78,7 +118,21 @@ static kuksa::val::v2::Value to_proto_value(const vss::types::Value& value) {
         } else if constexpr (std::is_same_v<T, std::string>) {
             proto_value.set_string(v);
         }
-        // Array types
+        // Narrowing array types (widen elements to protobuf physical type)
+        else if constexpr (std::is_same_v<T, std::vector<int8_t>>) {
+            auto* arr = proto_value.mutable_int32_array();
+            for (int8_t val : v) arr->add_values(static_cast<int32_t>(val));
+        } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+            auto* arr = proto_value.mutable_uint32_array();
+            for (uint8_t val : v) arr->add_values(static_cast<uint32_t>(val));
+        } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
+            auto* arr = proto_value.mutable_int32_array();
+            for (int16_t val : v) arr->add_values(static_cast<int32_t>(val));
+        } else if constexpr (std::is_same_v<T, std::vector<uint16_t>>) {
+            auto* arr = proto_value.mutable_uint32_array();
+            for (uint16_t val : v) arr->add_values(static_cast<uint32_t>(val));
+        }
+        // Direct array types (no conversion)
         else if constexpr (std::is_same_v<T, std::vector<bool>>) {
             auto* arr = proto_value.mutable_bool_array();
             for (bool val : v) arr->add_values(val);
@@ -255,37 +309,37 @@ public:
     // Actuator/Sensor Registration
     // ========================================================================
 
-    Status serve_actuator_impl(
+    void serve_actuator_impl(
         const std::string& path,
         int32_t signal_id,
         vss::types::ValueType type,
         std::function<void(const vss::types::Value&)> handler) override {
 
         if (running_) {
-            return absl::FailedPreconditionError("Cannot serve actuator while client is running");
+            LOG(ERROR) << "Cannot serve actuator while client is running: " << path;
+            throw std::logic_error("Cannot serve actuator while client is running");
         }
         actuator_handlers_.push_back({path, signal_id, type, handler});
         LOG(INFO) << "Registered actuator: " << path << " (ID: " << signal_id << ", type: " << vss::types::value_type_to_string(type) << ")";
-        return absl::OkStatus();
     }
 
     // ========================================================================
     // Subscription
     // ========================================================================
 
-    Status subscribe_impl(
+    void subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback) override {
 
         if (running_.load()) {
-            return absl::FailedPreconditionError("Cannot subscribe after client has started");
+            LOG(ERROR) << "Cannot subscribe after client has started: " << handle->path();
+            throw std::logic_error("Cannot subscribe after client has started");
         }
 
         LOG(INFO) << "Registering subscription to " << handle->path();
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
         subscriptions_[handle->id()] = callback;
         id_to_handle_[handle->id()] = handle;
-        return absl::OkStatus();
     }
 
     bool unsubscribe_impl(int32_t signal_id) override {

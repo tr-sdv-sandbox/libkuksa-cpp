@@ -108,11 +108,11 @@ public:
      * The handle is resolved externally and passed in for registration.
      * The same handle is used for both actuation dispatch and publishing.
      *
-     * Must be called before start(). Cannot be called while client is running.
+     * Must be called before start().
      *
      * @param handle Signal handle for the actuator (from Resolver)
      * @param callback Called when actuation request arrives
-     * @return Status - OkStatus if queued successfully, FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      *
      * @warning The callback is executed on the provider gRPC thread.
      *          DO NOT call publish() from inside the callback - it will cause
@@ -124,14 +124,11 @@ public:
      * auto door = resolver->get<bool>("Vehicle.Door.IsLocked");
      * std::queue<Work> work_queue;
      *
-     * auto status = client->serve_actuator(door, [&](bool target, const SignalHandle<bool>& handle) {
+     * client->serve_actuator(door, [&](bool target, const SignalHandle<bool>& handle) {
      *     LOG(INFO) << "Lock door: " << target;
      *     work_queue.push({handle, target});  // Queue for processing
      *     // DON'T: client->publish(handle, target);  // WRONG - causes gRPC error!
      * });
-     * if (!status.ok()) {
-     *     LOG(ERROR) << "Failed to register actuator: " << status;
-     * }
      *
      * // Later, from worker thread:
      * auto [handle, value] = work_queue.pop();
@@ -139,10 +136,10 @@ public:
      * @endcode
      */
     template<typename T, typename Callback>
-    Status serve_actuator(
+    void serve_actuator(
         const SignalHandle<T>& handle,
         Callback&& callback) {
-        return serve_actuator_impl(
+        serve_actuator_impl(
             handle.path(),
             handle.id(),
             vss::types::get_value_type<T>(),
@@ -159,13 +156,13 @@ public:
      *
      * @param handle Dynamic handle for the actuator
      * @param callback Called when actuation request arrives
-     * @return Status - FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      */
     template<typename Callback>
-    Status serve_actuator(
+    void serve_actuator(
         const DynamicSignalHandle& handle,
         Callback&& callback) {
-        return serve_actuator_impl(
+        serve_actuator_impl(
             handle.path(),
             handle.id(),
             handle.type(),
@@ -177,9 +174,9 @@ public:
 
     /**
      * @brief Internal implementation for actuator registration
-     * @return Status - FailedPrecondition if client is already running
+     * @throws std::logic_error if client is already running
      */
-    virtual Status serve_actuator_impl(
+    virtual void serve_actuator_impl(
         const std::string& path,
         int32_t signal_id,
         vss::types::ValueType type,
@@ -229,6 +226,73 @@ public:
      * @brief Synchronously get value with dynamic handle
      */
     Result<vss::types::DynamicQualifiedValue> get(const DynamicSignalHandle& signal);
+
+    /**
+     * @brief Convenience: Get unwrapped value (for configuration/attribute reads)
+     *
+     * Simplifies the common pattern of reading configuration values or attributes
+     * where quality metadata is not needed. Unwraps both Result and QualifiedValue
+     * layers in one call.
+     *
+     * Returns Result<T> instead of Result<QualifiedValue<T>>, making it easy to
+     * use with .value_or() for defaulting.
+     *
+     * Error cases:
+     * - RPC fails → Returns RPC error status
+     * - Signal quality is not VALID → Returns UnavailableError with quality info
+     *
+     * @param signal Signal handle
+     * @return Result<T> containing the unwrapped value, or error status
+     *
+     * Example:
+     * @code
+     * // Simple: Extract value with default fallback
+     * float threshold = client->get_value(config_handle).value_or(23.6f);
+     *
+     * // With error checking:
+     * auto threshold = client->get_value(config_handle);
+     * if (threshold.ok()) {
+     *     LOG(INFO) << "Config value: " << *threshold;
+     * } else {
+     *     LOG(WARNING) << "Using default: " << threshold.status();
+     * }
+     * @endcode
+     */
+    template<typename T>
+    Result<T> get_value(const SignalHandle<T>& signal);
+
+    /**
+     * @brief Batch read multiple configuration values
+     *
+     * Reads multiple signals and returns their values as a tuple. Convenient for
+     * reading configuration/attributes at startup with structured binding.
+     *
+     * If any signal fails to read (RPC error or non-VALID quality), the entire
+     * operation fails and returns an error status.
+     *
+     * @param signals Signal handles to read
+     * @return Result<tuple<T1, T2, ...>> containing all values, or error status
+     *
+     * Example:
+     * @code
+     * // Read multiple configs with defaults
+     * auto [min_voltage, min_fuel] = client->get_values(
+     *     min_battery_voltage_,
+     *     min_fuel_level_
+     * ).value_or({23.6f, 10.0f});
+     *
+     * // With error checking:
+     * auto config = client->get_values(min_voltage_handle, min_fuel_handle);
+     * if (config.ok()) {
+     *     auto [voltage, fuel] = *config;
+     *     LOG(INFO) << "Config: " << voltage << "V, " << fuel << "%";
+     * } else {
+     *     LOG(ERROR) << "Failed to read config: " << config.status();
+     * }
+     * @endcode
+     */
+    template<typename... Ts>
+    Result<std::tuple<Ts...>> get_values(const SignalHandle<Ts>&... signals);
 
     /**
      * @brief Synchronously set signal value with quality
@@ -432,7 +496,7 @@ public:
      * start() is called. Any errors (invalid signal ID, connection failure) will be
      * reported via start() or wait_until_ready().
      *
-     * Must be called before start(). Cannot be called while client is running.
+     * Must be called before start().
      *
      * @warning The callback is executed on the subscription thread.
      *          It MUST NOT block or perform long-running operations.
@@ -440,17 +504,17 @@ public:
      *
      * @param signal Signal handle (obtained from Resolver)
      * @param callback Called when signal value changes or on initial value
-     * @return Status indicating success or failure (e.g., if called after start())
+     * @throws std::logic_error if client is already running
      */
     template<typename T>
-    Status subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
+    void subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback);
 
     /**
      * @brief Subscribe with dynamic handle
      *
-     * @return Status indicating success or failure (e.g., if called after start())
+     * @throws std::logic_error if client is already running
      */
-    Status subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
+    void subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback);
 
     /**
      * @brief Unsubscribe from a signal
@@ -555,7 +619,7 @@ protected:
         std::function<void(const std::map<int32_t, Status>&)> callback
     ) = 0;
 
-    virtual Status subscribe_impl(
+    virtual void subscribe_impl(
         std::shared_ptr<DynamicSignalHandle> handle,
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback
     ) = 0;
@@ -581,6 +645,10 @@ protected:
 // Synchronous get() implementations
 template<typename T>
 Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal) {
+    if (!signal.is_valid()) {
+        return absl::FailedPreconditionError("Cannot get() with invalid signal handle");
+    }
+
     auto result = get_impl(signal.id());
     if (!result.ok()) {
         return result.status();
@@ -617,9 +685,71 @@ inline Result<vss::types::DynamicQualifiedValue> Client::get(const DynamicSignal
     return get_impl(signal.id());
 }
 
+// Synchronous get_value() implementation
+template<typename T>
+Result<T> Client::get_value(const SignalHandle<T>& signal) {
+    // Call get() to retrieve QualifiedValue
+    auto result = get(signal);
+    if (!result.ok()) {
+        return result.status();
+    }
+
+    const auto& qvalue = *result;
+
+    // Check if value is present
+    if (!qvalue.value.has_value()) {
+        return absl::UnavailableError(
+            absl::StrFormat("Signal %s has no value (quality: %s)",
+                signal.path(),
+                vss::types::signal_quality_to_string(qvalue.quality))
+        );
+    }
+
+    // Check quality - only accept VALID
+    if (qvalue.quality != vss::types::SignalQuality::VALID) {
+        return absl::UnavailableError(
+            absl::StrFormat("Signal %s quality is %s (not VALID)",
+                signal.path(),
+                vss::types::signal_quality_to_string(qvalue.quality))
+        );
+    }
+
+    return *qvalue.value;
+}
+
+// Batch get_values() implementation
+template<typename... Ts>
+Result<std::tuple<Ts...>> Client::get_values(const SignalHandle<Ts>&... signals) {
+    // Call get_value() for each signal
+    std::tuple<Result<Ts>...> results = std::make_tuple(get_value(signals)...);
+
+    // Check if all succeeded
+    bool all_ok = std::apply([](const auto&... r) {
+        return (r.ok() && ...);
+    }, results);
+
+    if (!all_ok) {
+        // Find first error for reporting
+        absl::Status first_error;
+        std::apply([&first_error](const auto&... r) {
+            ((r.ok() || (first_error.ok() && (first_error = r.status(), true))) && ...);
+        }, results);
+        return first_error;
+    }
+
+    // Extract values into tuple
+    return std::apply([](auto&&... r) {
+        return std::make_tuple(*r...);
+    }, results);
+}
+
 // Synchronous set() implementations
 template<typename T>
 Status Client::set(const SignalHandle<T>& signal, const vss::types::QualifiedValue<T>& qvalue) {
+    if (!signal.is_valid()) {
+        return absl::FailedPreconditionError("Cannot set() with invalid signal handle");
+    }
+
     // Convert to DynamicQualifiedValue
     vss::types::DynamicQualifiedValue dyn_qvalue;
     if (qvalue.value.has_value()) {
@@ -641,8 +771,13 @@ inline Status Client::set(const DynamicSignalHandle& signal, const vss::types::D
 
 // Subscription implementations
 template<typename T>
-Status Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
-    return subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
+void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::Callback callback) {
+    if (!signal.is_valid()) {
+        LOG(ERROR) << "Cannot subscribe() with invalid signal handle";
+        throw std::invalid_argument("Cannot subscribe() with invalid signal handle");
+    }
+
+    subscribe_impl(signal.dynamic_handle(), [callback, path = signal.path()](const vss::types::DynamicQualifiedValue& dyn_qvalue) {
         // Convert DynamicQualifiedValue to QualifiedValue<T>
         if (vss::types::is_empty(dyn_qvalue.value)) {
             vss::types::QualifiedValue<T> qvalue;

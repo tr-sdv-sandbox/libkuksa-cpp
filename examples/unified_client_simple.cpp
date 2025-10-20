@@ -49,17 +49,13 @@ int main(int argc, char** argv) {
     auto door_lock_handle = *door_lock_result;
 
     // Register actuator with the handle
-    auto serve_status = client->serve_actuator(door_lock_handle, [](bool target, const SignalHandle<bool>& handle) {
+    client->serve_actuator(door_lock_handle, [](bool target, const SignalHandle<bool>& handle) {
         LOG(INFO) << "Actuation request for " << handle.path() << ": " << target;
 
         // In real code: queue to state machine/hardware controller
         // Don't block here - this runs on gRPC thread!
         // Handle is available if needed (e.g., for logging, type info)
     });
-    if (!serve_status.ok()) {
-        LOG(ERROR) << "Failed to register actuator: " << serve_status;
-        return 1;
-    }
 
     // ========================================================================
     // 2. Subscribe to a signal
@@ -71,15 +67,11 @@ int main(int argc, char** argv) {
     }
     auto speed = *speed_result;
 
-    auto subscribe_status = client->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
+    client->subscribe(speed, [](vss::types::QualifiedValue<float> qvalue) {
         if (qvalue.is_valid()) {
             LOG(INFO) << "Speed update: " << *qvalue.value << " km/h";
         }
     });
-    if (!subscribe_status.ok()) {
-        LOG(ERROR) << "Failed to subscribe: " << subscribe_status;
-        return 1;
-    }
 
     // ========================================================================
     // 3. Start and wait for ready
@@ -105,7 +97,7 @@ int main(int argc, char** argv) {
 
     // Get RW handles for sensors we want to publish
     auto rpm_result = resolver->get<uint32_t>("Vehicle.Powertrain.CombustionEngine.Speed");
-    auto temp_result = resolver->get<float>("Vehicle.Cabin.Temperature");
+    auto temp_result = resolver->get<float>("Vehicle.Cabin.HVAC.Station.Row1.Driver.Temperature");
     auto speed_rw_result = resolver->get<float>("Vehicle.Speed");
 
     if (rpm_result.ok() && temp_result.ok() && speed_rw_result.ok()) {
