@@ -242,13 +242,6 @@ client->subscribe(battery_voltage, [](vss::types::QualifiedValue<float> qv) {
             LOG(ERROR) << "Battery signal unavailable";
             enter_safe_mode();
             break;
-
-        case SignalQuality::STALE:
-            // Data not updating - degraded mode
-            LOG(WARNING) << "Battery data stale - using last value with caution";
-            system_degraded_ = true;
-            // Continue with last known value but mark system as degraded
-            break;
     }
 });
 ```
@@ -271,8 +264,6 @@ auto result = client->get(battery_voltage);
 if (result.ok()) {
     if (result->quality == SignalQuality::VALID && result->value.has_value()) {
         LOG(INFO) << "Battery: " << *result->value << "V";
-    } else if (result->quality == SignalQuality::STALE) {
-        LOG(WARNING) << "Stale data: " << *result->value << "V";
     } else {
         LOG(ERROR) << "Invalid quality: "
                   << vss::types::signal_quality_to_string(result->quality);

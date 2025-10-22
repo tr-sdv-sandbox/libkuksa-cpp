@@ -190,11 +190,6 @@ void ClimateProtectionSystem::subscribe_to_signals() {
                 LOG(ERROR) << "Battery voltage signal invalid - cannot trust data";
                 self->handle_battery_voltage_loss();
                 break;
-            case SignalQuality::STALE:
-                LOG(WARNING) << "Battery voltage data stale, continuing with last value: "
-                            << self->current_battery_voltage_ << "V (DEGRADED)";
-                self->system_degraded_ = true;
-                break;
         }
     });
 
@@ -214,35 +209,24 @@ void ClimateProtectionSystem::subscribe_to_signals() {
                 LOG(ERROR) << "Fuel level signal invalid - assuming low fuel";
                 self->handle_fuel_level_loss();
                 break;
-            case SignalQuality::STALE:
-                LOG(WARNING) << "Fuel level data stale, using last value: "
-                            << self->current_fuel_level_ << "% (DEGRADED)";
-                self->system_degraded_ = true;
-                break;
         }
     });
 
-    // Important: HVAC state (can continue with stale data briefly)
+    // Important: HVAC state
     client_->subscribe(hvac_is_active_, [self](vss::types::QualifiedValue<bool> qv) {
         using vss::types::SignalQuality;
         if (qv.quality == SignalQuality::VALID) {
             self->handle_hvac_state_change(*qv.value);
-        } else if (qv.quality == SignalQuality::STALE) {
-            LOG(WARNING) << "HVAC state data stale, using last known: "
-                        << (self->current_hvac_active_ ? "active" : "inactive");
         } else {
             LOG(WARNING) << "HVAC state unavailable/invalid";
         }
     });
 
-    // Important: Engine state (can continue with stale data briefly)
+    // Important: Engine state
     client_->subscribe(engine_is_running_, [self](vss::types::QualifiedValue<bool> qv) {
         using vss::types::SignalQuality;
         if (qv.quality == SignalQuality::VALID) {
             self->handle_engine_state_change(*qv.value);
-        } else if (qv.quality == SignalQuality::STALE) {
-            LOG(WARNING) << "Engine state data stale, using last known: "
-                        << (self->current_engine_running_ ? "running" : "stopped");
         } else {
             LOG(WARNING) << "Engine state unavailable/invalid";
         }

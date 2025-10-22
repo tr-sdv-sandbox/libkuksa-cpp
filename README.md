@@ -70,7 +70,6 @@ client->subscribe(battery_voltage, [](vss::types::QualifiedValue<float> qv) {
         case SignalQuality::VALID:      // Use value
         case SignalQuality::INVALID:    // Sensor malfunction
         case SignalQuality::NOT_AVAILABLE:  // Signal lost
-        case SignalQuality::STALE:      // Data not updating
     }
 });
 ```
