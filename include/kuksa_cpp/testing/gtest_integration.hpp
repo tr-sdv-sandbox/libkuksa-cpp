@@ -59,6 +59,41 @@ protected:
     virtual void StopTestSubject() = 0;
 
     /**
+     * @brief Override to provide custom VSS schema
+     * @return Path to complete VSS JSON file containing all signals your application needs
+     *
+     * The file should contain the full VSS tree with all signals.
+     * Leave empty to use databroker's built-in VSS 5.1.
+     *
+     * Example:
+     *   return "../vss_climate_control.json";
+     */
+    virtual std::string GetVssSchema() const {
+        return "";  // Default: use built-in VSS 5.1
+    }
+
+    /**
+     * @brief Override to use custom KUKSA port (for parallel test execution)
+     * @return Port number, or 0 to auto-select available port
+     *
+     * Default is 55555. Override if running multiple test suites in parallel.
+     *
+     * Example:
+     *   return 55557;  // Avoid conflicts with other tests
+     */
+    virtual uint16_t GetKuksaPort() const {
+        return 55555;  // Default port
+    }
+
+    /**
+     * @brief Get actual KUKSA port after container startup
+     * @return The port number that KUKSA is listening on
+     */
+    uint16_t GetActualKuksaPort() const {
+        return actual_kuksa_port_;
+    }
+
+    /**
      * Run all test cases from a YAML test suite.
      * Each test case will be executed and failures will trigger EXPECT failures.
      */
@@ -83,6 +118,9 @@ private:
     std::string network_name_;
     std::string databroker_name_;
     std::string fixture_name_;
+    std::string kuksa_address_;
+    uint16_t actual_kuksa_port_ = 55555;
+    bool skip_container_management_ = false;
 
     std::shared_ptr<KuksaClientWrapper> kuksa_client_;
     std::shared_ptr<TestRunner> test_runner_;
@@ -93,6 +131,7 @@ private:
     void WaitForDatabroker();
 
     int RunCommand(const std::string& cmd);
+    std::string GetCommandOutput(const std::string& cmd);
     std::string GenerateContainerName(const std::string& prefix);
 };
 

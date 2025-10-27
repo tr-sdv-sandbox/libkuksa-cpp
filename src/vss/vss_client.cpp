@@ -869,6 +869,7 @@ private:
 
     void handle_subscription_update(int32_t signal_id, const Datapoint& datapoint) {
         std::function<void(const vss::types::DynamicQualifiedValue&)> callback;
+        std::shared_ptr<DynamicSignalHandle> handle;
 
         {
             std::lock_guard<std::mutex> lock(subscriptions_mutex_);
@@ -876,11 +877,21 @@ private:
             if (it != subscriptions_.end()) {
                 callback = it->second;
             }
+            auto handle_it = id_to_handle_.find(signal_id);
+            if (handle_it != id_to_handle_.end()) {
+                handle = handle_it->second;
+            }
         }
 
         if (callback) {
             try {
                 auto qvalue = datapoint_to_qualified_value(datapoint);
+
+                // Narrow value to signal's registered metadata type if needed
+                if (handle) {
+                    qvalue = vss::types::convert_qualified_value_type(qvalue, handle->type());
+                }
+
                 callback(qvalue);
             } catch (const std::exception& e) {
                 LOG(ERROR) << "Exception in subscription callback for ID " << signal_id << ": " << e.what();

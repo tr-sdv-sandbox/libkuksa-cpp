@@ -117,4 +117,28 @@ if(WITH_TESTING)
     )
 
     gtest_discover_tests(test_testing_library_integration)
+
+    # Climate control integration test - demonstrates full test framework
+    # Uses: KUKSA databroker + fixture runner + climate control app
+    add_executable(test_climate_control_integration
+        test_climate_control_integration.cpp
+        ../../examples/climate_control/climate_control.cpp
+    )
+
+    target_include_directories(test_climate_control_integration
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/climate_control
+    )
+
+    target_link_libraries(test_climate_control_integration
+        PRIVATE
+            sdv::testing
+            sdv::state_machine
+            kuksa
+            GTest::gtest
+            glog::glog
+    )
+
+    gtest_discover_tests(test_climate_control_integration)
 endif()

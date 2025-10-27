@@ -6,6 +6,7 @@
 #include <ctime>
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 
 namespace sdv {
 namespace testing {
@@ -20,19 +21,88 @@ int YamlTestFixture::RunCommand(const std::string& cmd) {
     return system(cmd.c_str());
 }
 
+std::string YamlTestFixture::GetCommandOutput(const std::string& cmd) {
+    std::string result;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return "";
+    }
+
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result += buffer;
+    }
+
+    pclose(pipe);
+    return result;
+}
+
 void YamlTestFixture::StartDatabroker() {
     LOG(INFO) << "Starting KUKSA databroker...";
 
-    std::string cmd = "docker run -d "
-        "--name " + databroker_name_ + " "
-        "--network " + network_name_ + " "
-        "-p 55555:55555 "
-        "ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.0 "
-        "--metadata /vss.json 2>&1";
+    // Check Docker availability
+    if (RunCommand("docker --version > /dev/null 2>&1") != 0) {
+        throw std::runtime_error(
+            "Docker is not available or not running.\n"
+            "Install Docker: https://docs.docker.com/get-docker/\n"
+            "Or set KUKSA_ADDRESS environment variable to use existing instance."
+        );
+    }
 
-    int result = RunCommand(cmd);
+    // Check port availability
+    std::string port = std::to_string(actual_kuksa_port_);
+    if (RunCommand("nc -z localhost " + port + " 2>/dev/null") == 0) {
+        throw std::runtime_error(
+            "Port " + port + " is already in use.\n"
+            "Options:\n"
+            "  1. Stop service on port " + port + "\n"
+            "  2. Override GetKuksaPort() to use different port\n"
+            "  3. Set KUKSA_ADDRESS to use existing KUKSA instance"
+        );
+    }
+
+    std::stringstream cmd;
+    cmd << "docker run -d "
+        << "--name " << databroker_name_ << " "
+        << "--network " << network_name_ << " "
+        << "-p " << actual_kuksa_port_ << ":55555 ";
+
+    // Check for custom VSS schema
+    std::string vss_path = GetVssSchema();
+    if (!vss_path.empty()) {
+        // Validate file exists
+        if (!std::filesystem::exists(vss_path)) {
+            throw std::runtime_error(
+                "VSS schema file not found: " + vss_path + "\n"
+                "Provide absolute or relative path to VSS JSON file."
+            );
+        }
+
+        std::filesystem::path abs_vss = std::filesystem::absolute(vss_path);
+        LOG(INFO) << "Using custom VSS schema: " << abs_vss.string();
+
+        cmd << "-v " << abs_vss.string() << ":/vss/custom.json:ro ";
+        cmd << "ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.0 ";
+        cmd << "--vss /vss/custom.json 2>&1";
+    } else {
+        LOG(INFO) << "Using built-in VSS 5.1 schema";
+        cmd << "ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.0 ";
+        cmd << "--vss /vss.json 2>&1";
+    }
+
+    int result = RunCommand(cmd.str());
     if (result != 0) {
-        throw std::runtime_error("Failed to start databroker");
+        // Try to get container logs for debugging
+        std::string logs = GetCommandOutput("docker logs " + databroker_name_ + " 2>&1");
+
+        throw std::runtime_error(
+            "Failed to start KUKSA databroker.\n\n"
+            "Container logs:\n" + logs + "\n\n"
+            "Common fixes:\n"
+            "  - Pull image: docker pull ghcr.io/eclipse-kuksa/kuksa-databroker:0.6.0\n"
+            "  - Check Docker: docker ps\n"
+            "  - Check disk space: df -h"
+        );
     }
 }
 
@@ -114,6 +184,36 @@ void YamlTestFixture::StopAllContainers() {
 }
 
 void YamlTestFixture::SetUp() {
+    // Check for external KUKSA instance
+    const char* env_addr = std::getenv("KUKSA_ADDRESS");
+    if (env_addr) {
+        kuksa_address_ = env_addr;
+        skip_container_management_ = true;
+        LOG(INFO) << "Using external KUKSA at: " << kuksa_address_;
+
+        // Connect to existing KUKSA
+        kuksa_client_ = std::make_shared<KuksaClientWrapper>(kuksa_address_);
+        if (!kuksa_client_->connect()) {
+            GTEST_SKIP() << "Cannot connect to KUKSA at " << kuksa_address_;
+        }
+
+        test_runner_ = std::make_shared<TestRunner>(kuksa_client_);
+
+        LOG(WARNING) << "Using external KUKSA - fixtures must be managed separately";
+        return;
+    }
+
+    // Normal flow: start containers
+    // Get port configuration
+    uint16_t port = GetKuksaPort();
+    if (port == 0) {
+        // TODO: Implement port auto-selection
+        port = 55555;
+        LOG(WARNING) << "Port auto-selection not yet implemented, using default 55555";
+    }
+    actual_kuksa_port_ = port;
+    kuksa_address_ = "localhost:" + std::to_string(actual_kuksa_port_);
+
     // Generate unique names
     network_name_ = GenerateContainerName("test-network");
     databroker_name_ = GenerateContainerName("databroker");
@@ -128,7 +228,7 @@ void YamlTestFixture::SetUp() {
     WaitForDatabroker();
 
     // Connect KUKSA client
-    kuksa_client_ = std::make_shared<KuksaClientWrapper>("localhost:55555");
+    kuksa_client_ = std::make_shared<KuksaClientWrapper>(kuksa_address_);
     if (!kuksa_client_->connect()) {
         throw std::runtime_error("Failed to connect to KUKSA");
     }
