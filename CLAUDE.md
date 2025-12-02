@@ -108,3 +108,10 @@ System packages (Ubuntu): `build-essential cmake libgrpc++-dev libprotobuf-dev p
 - `examples/climate_control/` - Full-featured example with state machines
 - `examples/door_example.cpp` - Simple actuator control
 - `examples/unified_client_simple.cpp` - Basic API usage
+
+## Utilities
+
+- `utils/kuksa_logger` - Real-time signal logger (like candump for VSS)
+  ```bash
+  kuksa_logger --address=localhost:55555 --pattern="Vehicle.Speed"
+  ```
