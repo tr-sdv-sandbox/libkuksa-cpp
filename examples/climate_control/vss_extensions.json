@@ -1,0 +1,143 @@
+{
+  "Vehicle": {
+    "type": "branch",
+    "description": "High-level vehicle data",
+    "children": {
+      "LowVoltageBattery": {
+        "type": "branch",
+        "description": "Low voltage battery (12V/24V)",
+        "children": {
+          "CurrentVoltage": {
+            "type": "sensor",
+            "datatype": "float",
+            "unit": "V",
+            "description": "Current voltage of the low voltage battery"
+          }
+        }
+      },
+      "OBD": {
+        "type": "branch",
+        "description": "OBD data",
+        "children": {
+          "FuelLevel": {
+            "type": "sensor",
+            "datatype": "float",
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "description": "Fuel level in percent"
+          },
+          "CoolantTemperature": {
+            "type": "sensor",
+            "datatype": "float",
+            "unit": "celsius",
+            "description": "Engine coolant temperature"
+          }
+        }
+      },
+      "Cabin": {
+        "type": "branch",
+        "description": "Cabin data",
+        "children": {
+          "HVAC": {
+            "type": "branch",
+            "description": "HVAC data",
+            "children": {
+              "IsAirConditioningActive": {
+                "type": "actuator",
+                "datatype": "boolean",
+                "description": "Is air conditioning active"
+              },
+              "AmbientAirTemperature": {
+                "type": "sensor",
+                "datatype": "float",
+                "unit": "celsius",
+                "description": "Ambient air temperature in cabin"
+              },
+              "Station": {
+                "type": "branch",
+                "description": "Climate control stations",
+                "children": {
+                  "Row1": {
+                    "type": "branch",
+                    "description": "Row 1 climate control",
+                    "children": {
+                      "Driver": {
+                        "type": "branch",
+                        "description": "Driver climate control",
+                        "children": {
+                          "Temperature": {
+                            "type": "sensor",
+                            "datatype": "float",
+                            "unit": "celsius",
+                            "description": "Driver temperature setting"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Powertrain": {
+        "type": "branch",
+        "description": "Powertrain data",
+        "children": {
+          "CombustionEngine": {
+            "type": "branch",
+            "description": "Combustion engine",
+            "children": {
+              "IsRunning": {
+                "type": "sensor",
+                "datatype": "boolean",
+                "description": "Is engine running"
+              }
+            }
+          }
+        }
+      },
+      "Private": {
+        "type": "branch",
+        "description": "Private/custom vehicle signals not in standard VSS",
+        "children": {
+          "Engine": {
+            "type": "branch",
+            "description": "Private engine control signals",
+            "children": {
+              "IsStartWithoutIntentionToDrive": {
+                "type": "actuator",
+                "datatype": "boolean",
+                "description": "Command to start engine without intention to drive (for battery charging, remote climate, etc.)"
+              }
+            }
+          },
+          "HVAC": {
+            "type": "branch",
+            "description": "Private HVAC configuration signals",
+            "children": {
+              "MinimumBatteryVoltageForHVAC": {
+                "type": "attribute",
+                "datatype": "float",
+                "unit": "V",
+                "description": "Minimum battery voltage threshold required to operate HVAC system",
+                "default": 23.6
+              },
+              "MinimumFuelLevelForHVAC": {
+                "type": "attribute",
+                "datatype": "float",
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "description": "Minimum fuel level threshold required to operate HVAC system",
+                "default": 10.0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,161 +8,110 @@
 # - Fixture runner (container) simulating battery sensor
 # - Climate control app (test subject on host)
 
-name: Climate Control Battery Protection
-description: Verify HVAC shutdown when battery voltage critical
+test_suite:
+  name: Climate Control Battery Protection
+  description: Verify HVAC shutdown when battery voltage critical
 
-# Fixtures simulate external sensors/actuators
-fixtures:
-  - name: battery_sensor
-    type: sensor
-    config:
-      signal: Vehicle.LowVoltageBattery.CurrentVoltage
-      initial_value: "24.5"
-      update_interval_ms: "100"
+  # Fixtures simulate external sensors/actuators
+  fixtures:
+    - name: battery_sensor
+      type: sensor
+      config:
+        signal: Vehicle.LowVoltageBattery.CurrentVoltage
+        initial_value: "24.5"
+        update_interval_ms: "100"
 
-  - name: hvac_actuator
-    type: actuator
-    config:
-      signal: Vehicle.Cabin.HVAC.IsAirConditioningActive
-      initial_value: "true"
+    - name: hvac_actuator
+      type: actuator
+      config:
+        signal: Vehicle.Cabin.HVAC.IsAirConditioningActive
+        initial_value: "true"
 
-# Global setup - runs once before all test cases
-setup:
-  - type: inject
-    path: Vehicle.OBD.FuelLevel
-    value: 75.0
-    description: Set fuel level to normal (75%)
-
-  - type: inject
-    path: Vehicle.Powertrain.CombustionEngine.IsRunning
-    value: false
-    description: Engine is off initially
-
-  - type: wait
-    seconds: 1.0
-    description: Let system stabilize
-
-# Test cases
-test_cases:
-  # Test Case 1: Normal operation with good battery
-  - name: Normal Operation with Good Battery
-    description: System allows HVAC to run when battery voltage is normal
-
-    steps:
-      - type: log
-        message: "=== Test 1: Normal battery voltage ==="
-
-      - type: inject
-        path: Vehicle.LowVoltageBattery.CurrentVoltage
-        value: 24.5
-        description: Battery voltage is normal (24.5V)
-
-      - type: wait
-        seconds: 2.0
-        description: Let climate control process the signal
-
-      - type: expect
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
-        value: true
-        timeout: 3.0
-        description: HVAC should remain active
-
-      - type: log
-        message: "✓ HVAC remains active with good battery"
-
-  # Test Case 2: Battery protection triggers
-  - name: Battery Protection Triggers on Low Voltage
-    description: System shuts down HVAC when battery drops to critical level
-
-    setup:
-      - type: inject
-        path: Vehicle.LowVoltageBattery.CurrentVoltage
-        value: 24.5
-        description: Start with normal voltage
-
-      - type: inject
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
-        value: true
-        description: HVAC is on
-
-      - type: wait
-        seconds: 1.0
-
-    steps:
-      - type: log
-        message: "=== Test 2: Battery voltage drops to critical ==="
-
-      - type: inject
-        path: Vehicle.LowVoltageBattery.CurrentVoltage
-        value: 23.0
-        description: Battery drops to critical level (23.0V)
-
-      - type: wait
-        seconds: 2.0
-        description: Give protection system time to react
-
-      - type: expect
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+  # Global setup - runs once before all test cases
+  setup:
+    - inject:
+        path: Vehicle.OBD.FuelLevel
+        value: 75.0
+    - inject:
+        path: Vehicle.Powertrain.CombustionEngine.IsRunning
         value: false
-        timeout: 5.0
-        description: HVAC should be shut down for protection
+    - wait: 1.0
 
-      - type: log
-        message: "✓ Battery protection triggered - HVAC shut down"
+  # Test cases
+  test_cases:
+    # Test Case 1: Normal operation with good battery
+    - name: Normal Operation with Good Battery
+      description: System allows HVAC to run when battery voltage is normal
 
-    teardown:
-      - type: log
-        message: "Battery protection test completed"
+      steps:
+        - log: "=== Test 1: Normal battery voltage ==="
+        - inject:
+            path: Vehicle.LowVoltageBattery.CurrentVoltage
+            value: 24.5
+        - wait: 2.0
+        - expect:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: true
+            timeout: 3.0
+        - log: "HVAC remains active with good battery"
 
-  # Test Case 3: Recovery after battery voltage recovers
-  - name: System Recovers When Battery Voltage Improves
-    description: HVAC can be reactivated after battery voltage recovers
+    # Test Case 2: Battery protection triggers
+    - name: Battery Protection Triggers on Low Voltage
+      description: System shuts down HVAC when battery drops to critical level
 
-    setup:
-      - type: inject
-        path: Vehicle.LowVoltageBattery.CurrentVoltage
-        value: 23.0
-        description: Start with low battery
+      setup:
+        - inject:
+            path: Vehicle.LowVoltageBattery.CurrentVoltage
+            value: 24.5
+        - inject:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: true
+        - wait: 1.0
 
-      - type: inject
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
-        value: false
-        description: HVAC is off due to protection
+      steps:
+        - log: "=== Test 2: Battery voltage drops to critical ==="
+        - inject:
+            path: Vehicle.LowVoltageBattery.CurrentVoltage
+            value: 23.0
+        - wait: 2.0
+        - expect:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: false
+            timeout: 5.0
+        - log: "Battery protection triggered - HVAC shut down"
 
-      - type: wait
-        seconds: 1.0
+      teardown:
+        - log: "Battery protection test completed"
 
-    steps:
-      - type: log
-        message: "=== Test 3: Battery recovers to safe level ==="
+    # Test Case 3: Recovery after battery voltage recovers
+    - name: System Recovers When Battery Voltage Improves
+      description: HVAC can be reactivated after battery voltage recovers
 
-      - type: inject
-        path: Vehicle.LowVoltageBattery.CurrentVoltage
-        value: 25.0
-        description: Battery recovers to safe level (25.0V)
+      setup:
+        - inject:
+            path: Vehicle.LowVoltageBattery.CurrentVoltage
+            value: 23.0
+        - inject:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: false
+        - wait: 1.0
 
-      - type: wait
-        seconds: 1.0
-        description: Let protection system update state
+      steps:
+        - log: "=== Test 3: Battery recovers to safe level ==="
+        - inject:
+            path: Vehicle.LowVoltageBattery.CurrentVoltage
+            value: 25.0
+        - wait: 1.0
+        - inject:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: true
+        - wait: 1.0
+        - expect:
+            path: Vehicle.Cabin.HVAC.IsAirConditioningActive
+            value: true
+            timeout: 3.0
+        - log: "System recovered - HVAC operational"
 
-      - type: inject
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
-        value: true
-        description: Try to activate HVAC
-
-      - type: wait
-        seconds: 1.0
-
-      - type: expect
-        path: Vehicle.Cabin.HVAC.IsAirConditioningActive
-        value: true
-        timeout: 3.0
-        description: HVAC should be allowed to run again
-
-      - type: log
-        message: "✓ System recovered - HVAC operational"
-
-# Global teardown - runs once after all test cases
-teardown:
-  - type: log
-    message: "Climate control battery protection tests completed"
+  # Global teardown - runs once after all test cases
+  teardown:
+    - log: "Climate control battery protection tests completed"
