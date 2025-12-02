@@ -226,6 +226,74 @@ public:
         return {-1, vss::types::ValueType::UNSPECIFIED, SignalClass::UNKNOWN};
     }
 
+    // List signals matching a pattern
+    Result<std::vector<std::shared_ptr<DynamicSignalHandle>>> list_signals_impl(const std::string& pattern) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (!connected_) {
+            return VSSError::ConnectionFailed(address_, "Not connected");
+        }
+
+        ClientContext context;
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+
+        ListMetadataRequest request;
+        request.set_root(pattern);
+
+        ListMetadataResponse response;
+        grpc::Status grpc_status = stub_->ListMetadata(&context, request, &response);
+
+        if (!grpc_status.ok()) {
+            LOG(ERROR) << "Failed to list metadata for " << pattern << ": " << grpc_status.error_message();
+            return absl::UnavailableError(grpc_status.error_message());
+        }
+
+        std::vector<std::shared_ptr<DynamicSignalHandle>> handles;
+        handles.reserve(response.metadata_size());
+
+        for (const auto& metadata : response.metadata()) {
+            // Skip entries without valid ID (branches)
+            if (metadata.id() == 0) {
+                continue;
+            }
+
+            // Check cache first
+            auto it = handle_cache_.find(metadata.path());
+            if (it != handle_cache_.end()) {
+                handles.push_back(it->second);
+                continue;
+            }
+
+            // Convert types
+            vss::types::ValueType vtype = static_cast<vss::types::ValueType>(metadata.data_type());
+
+            SignalClass sclass = SignalClass::UNKNOWN;
+            switch (metadata.entry_type()) {
+                case kuksa::val::v2::ENTRY_TYPE_SENSOR:
+                    sclass = SignalClass::SENSOR;
+                    break;
+                case kuksa::val::v2::ENTRY_TYPE_ACTUATOR:
+                    sclass = SignalClass::ACTUATOR;
+                    break;
+                case kuksa::val::v2::ENTRY_TYPE_ATTRIBUTE:
+                    sclass = SignalClass::ATTRIBUTE;
+                    break;
+                default:
+                    continue;  // Skip unknown entry types
+            }
+
+            // Create and cache handle
+            auto handle = std::shared_ptr<DynamicSignalHandle>(
+                new DynamicSignalHandle(metadata.path(), metadata.id(), vtype, sclass)
+            );
+            handle_cache_[metadata.path()] = handle;
+            handles.push_back(handle);
+        }
+
+        LOG(INFO) << "Listed " << handles.size() << " signals matching " << pattern;
+        return handles;
+    }
+
 private:
     std::string address_;
     bool connected_;
@@ -296,6 +364,10 @@ Result<SignalHandle<T>> Resolver::get(const std::string& path) {
 
 Result<std::shared_ptr<DynamicSignalHandle>> Resolver::get_dynamic(const std::string& path) {
     return static_cast<VSSResolverImpl*>(this)->get_dynamic_impl(path);
+}
+
+Result<std::vector<std::shared_ptr<DynamicSignalHandle>>> Resolver::list_signals(const std::string& pattern) {
+    return static_cast<VSSResolverImpl*>(this)->list_signals_impl(pattern);
 }
 
 // ============================================================================

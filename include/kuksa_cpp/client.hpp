@@ -798,4 +798,11 @@ void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::
     });
 }
 
+inline void Client::subscribe(const DynamicSignalHandle& signal, std::function<void(const vss::types::DynamicQualifiedValue&)> callback) {
+    // DynamicSignalHandle is always valid if it exists (created by Resolver)
+    // We need to wrap it in a shared_ptr for subscribe_impl
+    auto handle_ptr = std::make_shared<DynamicSignalHandle>(signal);
+    subscribe_impl(handle_ptr, std::move(callback));
+}
+
 } // namespace kuksa

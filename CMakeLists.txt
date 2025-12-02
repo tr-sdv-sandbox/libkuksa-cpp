@@ -270,6 +270,9 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
+# Utils
+add_subdirectory(utils)
+
 # Tests
 if(BUILD_TESTS)
     enable_testing()

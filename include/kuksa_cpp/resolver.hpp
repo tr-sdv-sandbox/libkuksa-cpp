@@ -5,8 +5,9 @@
 
 #pragma once
 
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 #include <kuksa_cpp/types.hpp>
 #include <kuksa_cpp/error.hpp>
 #include <kuksa_cpp/signal_set.hpp>
@@ -110,6 +111,32 @@ public:
      * @endcode
      */
     Result<std::shared_ptr<DynamicSignalHandle>> get_dynamic(const std::string& path);
+
+    /**
+     * @brief List all signals under a branch from the databroker's schema
+     *
+     * Queries the KUKSA databroker for all signals matching the specified pattern.
+     * Returns handles that are immediately usable for subscribe/get/set operations.
+     *
+     * @param pattern Root path or pattern (e.g., "Vehicle", "Vehicle.Cabin.**")
+     * @return Result containing vector of DynamicSignalHandle, or error
+     *
+     * Example:
+     * @code
+     * // List all signals
+     * auto all_signals = resolver->list_signals("Vehicle");
+     *
+     * // List only cabin signals
+     * auto cabin_signals = resolver->list_signals("Vehicle.Cabin");
+     *
+     * // Subscribe to all returned signals
+     * for (const auto& handle : *cabin_signals) {
+     *     client->subscribe(*handle, callback);
+     * }
+     * @endcode
+     */
+    Result<std::vector<std::shared_ptr<DynamicSignalHandle>>> list_signals(
+        const std::string& pattern = "Vehicle");
 
     // ========================================================================
     // BATCH RESOLUTION (Fluent API)
