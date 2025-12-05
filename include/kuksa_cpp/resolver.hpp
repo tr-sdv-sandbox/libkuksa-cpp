@@ -187,9 +187,9 @@ protected:
 template<typename T>
 SignalSetBuilder& SignalSetBuilder::add(SignalHandle<T>& handle, const std::string& path) {
     // Create a resolver lambda that captures the handle reference and path
-    signal_specs_.push_back({
-        .path = path,
-        .resolver = [this, &handle, path]() -> absl::Status {
+    signal_specs_.push_back(SignalSpec{
+        path,
+        [this, &handle, path]() -> absl::Status {
             auto result = resolver_->template get<T>(path);
             if (!result.ok()) {
                 return result.status();
