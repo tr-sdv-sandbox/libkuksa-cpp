@@ -12,6 +12,7 @@
 #include <kuksa_cpp/resolver.hpp>
 #include <glog/logging.h>
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 using namespace kuksa;

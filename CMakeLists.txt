@@ -18,6 +18,13 @@ find_package(Threads REQUIRED)
 find_package(glog REQUIRED)
 
 find_package(Protobuf REQUIRED)
+
+# Abseil is required by protobuf when built with shared libs
+find_package(absl QUIET)
+if(absl_FOUND)
+    message(STATUS "Found absl - will link with protobuf")
+endif()
+
 # Try to find gRPC using CONFIG first, fall back to pkg-config
 find_package(gRPC CONFIG QUIET)
 if(NOT gRPC_FOUND)
@@ -176,6 +183,14 @@ target_link_libraries(kuksa_cpp
         glog::glog
         vss::types
 )
+
+# Link abseil if available (required by protobuf on some platforms)
+if(absl_FOUND)
+    target_link_libraries(kuksa_cpp PUBLIC
+        absl::log_internal_check_op
+        absl::log_internal_message
+    )
+endif()
 
 install(TARGETS kuksa_cpp
     EXPORT kuksa_cpp-targets
