@@ -184,8 +184,9 @@ target_link_libraries(kuksa_cpp
         vss::types
 )
 
-# Link abseil if available (required by protobuf on some platforms)
-if(absl_FOUND)
+# Link abseil if available (required by protobuf on some platforms when built with shared libs)
+# Check for specific target, not just package - internal targets vary by abseil version
+if(TARGET absl::log_internal_check_op)
     target_link_libraries(kuksa_cpp PUBLIC
         absl::log_internal_check_op
         absl::log_internal_message
