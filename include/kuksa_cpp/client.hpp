@@ -25,8 +25,87 @@
 #include <map>
 #include <functional>
 #include <memory>
+#include <type_traits>
+#include <optional>
 
 namespace kuksa {
+
+// ========================================================================
+// Narrowing type extraction helpers (must be before Client class)
+// ========================================================================
+
+namespace detail {
+
+/**
+ * @brief Type trait mapping narrowing types to their wire types
+ *
+ * KUKSA protobuf uses int32/uint32 on the wire for int8/int16/uint8/uint16.
+ * This trait maps the user's requested type to the wire type for extraction.
+ */
+template<typename T>
+struct wire_type { using type = T; };  // Default: same type
+
+// Signed narrowing types use int32_t on wire
+template<> struct wire_type<int8_t> { using type = int32_t; };
+template<> struct wire_type<int16_t> { using type = int32_t; };
+
+// Unsigned narrowing types use uint32_t on wire
+template<> struct wire_type<uint8_t> { using type = uint32_t; };
+template<> struct wire_type<uint16_t> { using type = uint32_t; };
+
+// Array narrowing types
+template<> struct wire_type<std::vector<int8_t>> { using type = std::vector<int32_t>; };
+template<> struct wire_type<std::vector<int16_t>> { using type = std::vector<int32_t>; };
+template<> struct wire_type<std::vector<uint8_t>> { using type = std::vector<uint32_t>; };
+template<> struct wire_type<std::vector<uint16_t>> { using type = std::vector<uint32_t>; };
+
+template<typename T>
+using wire_type_t = typename wire_type<T>::type;
+
+/**
+ * @brief Check if T is a narrowing type (int8, uint8, int16, uint16 or arrays thereof)
+ */
+template<typename T>
+constexpr bool is_narrowing_type_v = !std::is_same_v<T, wire_type_t<T>>;
+
+/**
+ * @brief Try to extract a value of type T from the variant
+ *
+ * Handles both direct extraction and narrowing conversion from wire types.
+ * Returns std::nullopt if extraction fails.
+ */
+template<typename T>
+std::optional<T> try_extract_value(const vss::types::Value& value) {
+    // First, try direct extraction
+    if (std::holds_alternative<T>(value)) {
+        return std::get<T>(value);
+    }
+
+    // For narrowing types, try extracting from wire type and converting
+    if constexpr (is_narrowing_type_v<T>) {
+        using WireT = wire_type_t<T>;
+        if (std::holds_alternative<WireT>(value)) {
+            if constexpr (std::is_arithmetic_v<T>) {
+                // Scalar narrowing conversion
+                return static_cast<T>(std::get<WireT>(value));
+            } else {
+                // Array narrowing conversion (std::vector<NarrowT>)
+                using ElemT = typename T::value_type;
+                const auto& wire_vec = std::get<WireT>(value);
+                T result;
+                result.reserve(wire_vec.size());
+                for (const auto& elem : wire_vec) {
+                    result.push_back(static_cast<ElemT>(elem));
+                }
+                return result;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+} // namespace detail
 
 /**
  * @brief Unified VSS client with dual streams
@@ -144,7 +223,13 @@ public:
             handle.id(),
             vss::types::get_value_type<T>(),
             [callback = std::forward<Callback>(callback), handle](const vss::types::Value& value) mutable {
-                callback(std::get<T>(value), handle);
+                auto extracted = detail::try_extract_value<T>(value);
+                if (extracted) {
+                    callback(std::move(*extracted), handle);
+                } else {
+                    LOG(ERROR) << "Failed to extract actuator value for " << handle.path()
+                               << ": type mismatch (value index " << value.index() << ")";
+                }
             }
         );
     }
@@ -667,7 +752,8 @@ Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal)
     }
 
     const auto& value = dyn_qvalue.value;
-    if (!std::holds_alternative<T>(value)) {
+    auto extracted = detail::try_extract_value<T>(value);
+    if (!extracted) {
         return absl::InvalidArgumentError(
             absl::StrFormat("Type mismatch for %s: expected type index %d, got %d",
                 signal.path(), vss::types::Value(T{}).index(), value.index())
@@ -675,7 +761,7 @@ Result<vss::types::QualifiedValue<T>> Client::get(const SignalHandle<T>& signal)
     }
 
     return vss::types::QualifiedValue<T>{
-        std::get<T>(value),
+        std::move(*extracted),
         dyn_qvalue.quality,
         dyn_qvalue.timestamp
     };
@@ -787,8 +873,9 @@ void Client::subscribe(const SignalHandle<T>& signal, typename SignalHandle<T>::
             callback(qvalue);
         } else {
             const auto& value = dyn_qvalue.value;
-            if (std::holds_alternative<T>(value)) {
-                callback(vss::types::QualifiedValue<T>{std::get<T>(value), dyn_qvalue.quality, dyn_qvalue.timestamp});
+            auto extracted = detail::try_extract_value<T>(value);
+            if (extracted) {
+                callback(vss::types::QualifiedValue<T>{std::move(*extracted), dyn_qvalue.quality, dyn_qvalue.timestamp});
             } else {
                 LOG(WARNING) << "Type mismatch in subscription callback for " << path
                             << " - expected type index " << vss::types::Value(T{}).index()
