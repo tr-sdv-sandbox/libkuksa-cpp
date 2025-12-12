@@ -26,6 +26,7 @@ DEFINE_string(address, "localhost:55555", "KUKSA databroker address");
 DEFINE_string(pattern, "Vehicle", "Signal branch to subscribe to (e.g., Vehicle, Vehicle.Speed, Vehicle.Cabin)");
 DEFINE_bool(timestamp, true, "Show timestamps");
 DEFINE_bool(quiet, false, "Suppress startup messages");
+DEFINE_int32(ready_timeout, 30, "Timeout in seconds waiting for subscriptions to be ready");
 
 std::atomic<bool> g_shutdown{false};
 
@@ -224,8 +225,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Wait for ready
-    auto ready_status = client->wait_until_ready(std::chrono::seconds(5));
+    // Wait for ready (may take a while with many signals)
+    if (!FLAGS_quiet) {
+        std::cerr << "Waiting up to " << FLAGS_ready_timeout << "s for subscriptions..." << std::endl;
+    }
+    auto ready_status = client->wait_until_ready(std::chrono::seconds(FLAGS_ready_timeout));
     if (!ready_status.ok()) {
         std::cerr << "Client failed to become ready: " << ready_status << std::endl;
         return 1;
