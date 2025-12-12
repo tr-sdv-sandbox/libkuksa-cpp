@@ -152,7 +152,7 @@ private:
         LOG(INFO) << "Creating VSS test configuration...";
         
         std::ofstream vss_file("vss_test.json");
-        vss_file << R"({
+        vss_file << R"JSON({
   "Vehicle": {
     "type": "branch",
     "description": "High-level vehicle data",
@@ -236,6 +236,46 @@ private:
                 "datatype": "string",
                 "description": "Test string sensor"
               },
+              "Int8Sensor": {
+                "type": "sensor",
+                "datatype": "int8",
+                "description": "Test int8 sensor (narrowing type)"
+              },
+              "UInt8Sensor": {
+                "type": "sensor",
+                "datatype": "uint8",
+                "description": "Test uint8 sensor (narrowing type)"
+              },
+              "Int16Sensor": {
+                "type": "sensor",
+                "datatype": "int16",
+                "description": "Test int16 sensor (narrowing type)"
+              },
+              "UInt16Sensor": {
+                "type": "sensor",
+                "datatype": "uint16",
+                "description": "Test uint16 sensor (narrowing type)"
+              },
+              "Int8ArraySensor": {
+                "type": "sensor",
+                "datatype": "int8[]",
+                "description": "Test int8 array sensor (narrowing type)"
+              },
+              "UInt8ArraySensor": {
+                "type": "sensor",
+                "datatype": "uint8[]",
+                "description": "Test uint8 array sensor (narrowing type)"
+              },
+              "Int16ArraySensor": {
+                "type": "sensor",
+                "datatype": "int16[]",
+                "description": "Test int16 array sensor (narrowing type)"
+              },
+              "UInt16ArraySensor": {
+                "type": "sensor",
+                "datatype": "uint16[]",
+                "description": "Test uint16 array sensor (narrowing type)"
+              },
               "BoolArraySensor": {
                 "type": "sensor",
                 "datatype": "boolean[]",
@@ -316,6 +356,26 @@ private:
                 "type": "actuator",
                 "datatype": "string",
                 "description": "Test string actuator"
+              },
+              "Int8Actuator": {
+                "type": "actuator",
+                "datatype": "int8",
+                "description": "Test int8 actuator (narrowing type)"
+              },
+              "UInt8Actuator": {
+                "type": "actuator",
+                "datatype": "uint8",
+                "description": "Test uint8 actuator (narrowing type)"
+              },
+              "Int16Actuator": {
+                "type": "actuator",
+                "datatype": "int16",
+                "description": "Test int16 actuator (narrowing type)"
+              },
+              "UInt16Actuator": {
+                "type": "actuator",
+                "datatype": "uint16",
+                "description": "Test uint16 actuator (narrowing type)"
               },
               "BoolArrayActuator": {
                 "type": "actuator",
@@ -398,6 +458,26 @@ private:
                 "datatype": "string",
                 "description": "Test string attribute"
               },
+              "Int8Attribute": {
+                "type": "attribute",
+                "datatype": "int8",
+                "description": "Test int8 attribute (narrowing type)"
+              },
+              "UInt8Attribute": {
+                "type": "attribute",
+                "datatype": "uint8",
+                "description": "Test uint8 attribute (narrowing type)"
+              },
+              "Int16Attribute": {
+                "type": "attribute",
+                "datatype": "int16",
+                "description": "Test int16 attribute (narrowing type)"
+              },
+              "UInt16Attribute": {
+                "type": "attribute",
+                "datatype": "uint16",
+                "description": "Test uint16 attribute (narrowing type)"
+              },
               "BoolArrayAttribute": {
                 "type": "attribute",
                 "datatype": "boolean[]",
@@ -444,7 +524,7 @@ private:
       }
     }
   }
-})";
+})JSON";
         vss_file.close();
     }
 

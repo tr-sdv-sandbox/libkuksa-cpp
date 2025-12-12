@@ -377,6 +377,73 @@ TEST_F(AllTypesIntegrationTest, AllScalarAttributeTypes) {
     EXPECT_TRUE(test_attribute_type<std::string>("Vehicle.Private.Test.StringAttribute", std::string("Attribute Value")));
 }
 
+// =============================================================================
+// Narrowing type tests - these types use int32/uint32 on the wire but should
+// be correctly converted to/from int8/uint8/int16/uint16 in the client
+// =============================================================================
+
+// Test narrowing scalar sensor types (int8, uint8, int16, uint16)
+TEST_F(AllTypesIntegrationTest, NarrowingScalarSensorTypes) {
+    // int8_t - stored as int32 on wire, should narrow back to int8_t
+    EXPECT_TRUE(test_sensor_type<int8_t>("Vehicle.Private.Test.Int8Sensor", int8_t(-42)));
+    EXPECT_TRUE(test_sensor_type<int8_t>("Vehicle.Private.Test.Int8Sensor", int8_t(127)));  // max
+    EXPECT_TRUE(test_sensor_type<int8_t>("Vehicle.Private.Test.Int8Sensor", int8_t(-128))); // min
+
+    // uint8_t - stored as uint32 on wire, should narrow back to uint8_t
+    EXPECT_TRUE(test_sensor_type<uint8_t>("Vehicle.Private.Test.UInt8Sensor", uint8_t(42)));
+    EXPECT_TRUE(test_sensor_type<uint8_t>("Vehicle.Private.Test.UInt8Sensor", uint8_t(255))); // max
+    EXPECT_TRUE(test_sensor_type<uint8_t>("Vehicle.Private.Test.UInt8Sensor", uint8_t(0)));   // min
+
+    // int16_t - stored as int32 on wire, should narrow back to int16_t
+    EXPECT_TRUE(test_sensor_type<int16_t>("Vehicle.Private.Test.Int16Sensor", int16_t(-1000)));
+    EXPECT_TRUE(test_sensor_type<int16_t>("Vehicle.Private.Test.Int16Sensor", int16_t(32767)));  // max
+    EXPECT_TRUE(test_sensor_type<int16_t>("Vehicle.Private.Test.Int16Sensor", int16_t(-32768))); // min
+
+    // uint16_t - stored as uint32 on wire, should narrow back to uint16_t
+    EXPECT_TRUE(test_sensor_type<uint16_t>("Vehicle.Private.Test.UInt16Sensor", uint16_t(1000)));
+    EXPECT_TRUE(test_sensor_type<uint16_t>("Vehicle.Private.Test.UInt16Sensor", uint16_t(65535))); // max
+    EXPECT_TRUE(test_sensor_type<uint16_t>("Vehicle.Private.Test.UInt16Sensor", uint16_t(0)));     // min
+}
+
+// Test narrowing array sensor types
+TEST_F(AllTypesIntegrationTest, NarrowingArraySensorTypes) {
+    // int8_t array
+    EXPECT_TRUE(test_array_sensor_type<std::vector<int8_t>>(
+        "Vehicle.Private.Test.Int8ArraySensor",
+        std::vector<int8_t>{-128, 0, 127}));
+
+    // uint8_t array
+    EXPECT_TRUE(test_array_sensor_type<std::vector<uint8_t>>(
+        "Vehicle.Private.Test.UInt8ArraySensor",
+        std::vector<uint8_t>{0, 128, 255}));
+
+    // int16_t array
+    EXPECT_TRUE(test_array_sensor_type<std::vector<int16_t>>(
+        "Vehicle.Private.Test.Int16ArraySensor",
+        std::vector<int16_t>{-32768, 0, 32767}));
+
+    // uint16_t array
+    EXPECT_TRUE(test_array_sensor_type<std::vector<uint16_t>>(
+        "Vehicle.Private.Test.UInt16ArraySensor",
+        std::vector<uint16_t>{0, 32768, 65535}));
+}
+
+// Test narrowing actuator types
+TEST_F(AllTypesIntegrationTest, NarrowingActuatorTypes) {
+    EXPECT_TRUE(test_actuator_type<int8_t>("Vehicle.Private.Test.Int8Actuator", int8_t(-50)));
+    EXPECT_TRUE(test_actuator_type<uint8_t>("Vehicle.Private.Test.UInt8Actuator", uint8_t(200)));
+    EXPECT_TRUE(test_actuator_type<int16_t>("Vehicle.Private.Test.Int16Actuator", int16_t(-5000)));
+    EXPECT_TRUE(test_actuator_type<uint16_t>("Vehicle.Private.Test.UInt16Actuator", uint16_t(50000)));
+}
+
+// Test narrowing attribute types
+TEST_F(AllTypesIntegrationTest, NarrowingAttributeTypes) {
+    EXPECT_TRUE(test_attribute_type<int8_t>("Vehicle.Private.Test.Int8Attribute", int8_t(-100)));
+    EXPECT_TRUE(test_attribute_type<uint8_t>("Vehicle.Private.Test.UInt8Attribute", uint8_t(200)));
+    EXPECT_TRUE(test_attribute_type<int16_t>("Vehicle.Private.Test.Int16Attribute", int16_t(-10000)));
+    EXPECT_TRUE(test_attribute_type<uint16_t>("Vehicle.Private.Test.UInt16Attribute", uint16_t(40000)));
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     google::InitGoogleLogging(argv[0]);
