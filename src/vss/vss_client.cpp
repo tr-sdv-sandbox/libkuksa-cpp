@@ -323,6 +323,15 @@ public:
         LOG(INFO) << "Registered actuator: " << path << " (ID: " << signal_id << ", type: " << vss::types::value_type_to_string(type) << ")";
     }
 
+    void provide_signal_impl(const std::string& path, int32_t signal_id) override {
+        if (running_) {
+            LOG(ERROR) << "Cannot register signal provider while client is running: " << path;
+            throw std::logic_error("Cannot register signal provider while client is running");
+        }
+        signal_providers_.push_back({path, signal_id});
+        LOG(INFO) << "Registered signal provider: " << path << " (ID: " << signal_id << ")";
+    }
+
     // ========================================================================
     // Subscription
     // ========================================================================
@@ -498,22 +507,36 @@ public:
         const std::map<int32_t, vss::types::DynamicQualifiedValue>& values,
         std::function<void(const std::map<int32_t, absl::Status>&)> callback) override {
 
-        // Publish each value using standalone RPC
-        std::map<int32_t, absl::Status> errors;
-
-        for (const auto& [signal_id, value] : values) {
-            auto status = publish_impl(signal_id, value);
-            if (!status.ok()) {
-                errors[signal_id] = status;
-            }
+        if (values.empty()) {
+            if (callback) callback({});
+            return absl::OkStatus();
         }
 
-        // Invoke callback if provided
-        if (callback) {
-            callback(errors);
+        // Use provider stream for efficient batch publishing
+        std::lock_guard<std::mutex> lock(provider_stream_mutex_);
+        if (!provider_stream_) {
+            return absl::FailedPreconditionError("Client not started - call start() first");
         }
 
-        return errors.empty() ? absl::OkStatus() : absl::UnknownError("Some publishes failed");
+        // Build batch publish request
+        OpenProviderStreamRequest request;
+        auto* publish_req = request.mutable_publish_values_request();
+        publish_req->set_request_id(++publish_request_id_);
+
+        for (const auto& [signal_id, qvalue] : values) {
+            (*publish_req->mutable_data_points())[signal_id] = qualified_value_to_datapoint(qvalue);
+        }
+
+        if (!provider_stream_->Write(request)) {
+            return absl::UnavailableError("Failed to write to provider stream");
+        }
+
+        LOG(INFO) << "Batch published " << values.size() << " signals via stream (request_id="
+                  << publish_req->request_id() << ")";
+
+        // Note: Errors come async via publish_values_response, handled in provider loop
+        if (callback) callback({});
+        return absl::OkStatus();
     }
 
     // ========================================================================
@@ -527,11 +550,8 @@ public:
 
         running_ = true;
 
-        // Start provider thread only if we have actuators
-        // (Publishing uses standalone PublishValue RPCs, not the provider stream)
-        if (!actuator_handlers_.empty()) {
-            provider_thread_ = std::thread([this]() { provider_loop(); });
-        }
+        // Always start provider thread (used for actuators AND batch publishing)
+        provider_thread_ = std::thread([this]() { provider_loop(); });
 
         // Start subscriber thread (if we have subscriptions)
         if (!subscriptions_.empty()) {
@@ -539,8 +559,8 @@ public:
         }
 
         LOG(INFO) << "Unified client started (actuators="
-                  << !actuator_handlers_.empty() << ", subscriptions="
-                  << !subscriptions_.empty() << ")";
+                  << actuator_handlers_.size() << ", subscriptions="
+                  << subscriptions_.size() << ")";
 
         return absl::OkStatus();
     }
@@ -567,8 +587,8 @@ public:
     }
 
     Status status() const override {
-        // If we have actuators, provider must be OK
-        if (!actuator_handlers_.empty()) {
+        // If we have actuators OR signal providers, provider must be OK
+        if (!actuator_handlers_.empty() || !signal_providers_.empty()) {
             auto provider_status = provider_sm_->status();
             if (!provider_status.ok()) return provider_status;
         }
@@ -589,8 +609,8 @@ public:
 
         auto deadline = std::chrono::steady_clock::now() + timeout;
 
-        // Wait for provider if we have actuators
-        if (!actuator_handlers_.empty()) {
+        // Wait for provider if we have actuators OR signal providers
+        if (!actuator_handlers_.empty() || !signal_providers_.empty()) {
             auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                 deadline - std::chrono::steady_clock::now());
             auto status = provider_sm_->wait_until_active(remaining);
@@ -676,6 +696,12 @@ private:
             return;
         }
 
+        // Store stream pointer for batch publishing access
+        {
+            std::lock_guard<std::mutex> lock(provider_stream_mutex_);
+            provider_stream_ = stream.get();
+        }
+
         // Step 3: Register actuators (if we have any)
         if (!actuator_handlers_.empty()) {
             OpenProviderStreamRequest request;
@@ -694,12 +720,31 @@ private:
             LOG(INFO) << "Sent registration for " << actuator_handlers_.size() << " actuator(s)";
         }
 
-        // Step 4: Wait for responses and handle actuation requests
-        bool ready = actuator_handlers_.empty();  // If no actuators, we're ready immediately
+        // Step 4: Register signal providers (if we have any)
+        if (!signal_providers_.empty()) {
+            OpenProviderStreamRequest request;
+            auto* provide_req = request.mutable_provide_signal_request();
+            for (const auto& provider : signal_providers_) {
+                // Map signal_id to SampleInterval (empty interval = no rate limiting)
+                (*provide_req->mutable_signals_sample_intervals())[provider.signal_id] = {};
+            }
+            if (!stream->Write(request)) {
+                LOG(ERROR) << "Failed to register signal providers";
+                provider_sm_->trigger_stream_failed(absl::UnavailableError("Write failed"), true);
+                provider_sm_->trigger_stop();
+                return;
+            }
+            LOG(INFO) << "Sent registration for " << signal_providers_.size() << " signal provider(s)";
+        }
+
+        // Step 5: Wait for responses and handle actuation requests
+        bool actuators_ready = actuator_handlers_.empty();
+        bool signals_ready = signal_providers_.empty();
+        bool ready = actuators_ready && signals_ready;
 
         // Mark as ready if no registration sent
         if (ready) {
-            LOG(INFO) << "Provider stream ready (no actuators registered)";
+            LOG(INFO) << "Provider stream ready (no registrations)";
             provider_sm_->trigger_stream_ready();
         }
 
@@ -707,14 +752,41 @@ private:
         OpenProviderStreamResponse response;
         while (running_ && stream->Read(&response)) {
             if (response.has_provide_actuation_response()) {
-                if (!ready) {
+                if (!actuators_ready) {
                     LOG(INFO) << "Actuator registration confirmed";
-                    ready = true;
-                    provider_sm_->trigger_stream_ready();
+                    actuators_ready = true;
+                    if (signals_ready && !ready) {
+                        ready = true;
+                        provider_sm_->trigger_stream_ready();
+                    }
+                }
+            } else if (response.has_provide_signal_response()) {
+                if (!signals_ready) {
+                    LOG(INFO) << "Signal provider registration confirmed";
+                    signals_ready = true;
+                    if (actuators_ready && !ready) {
+                        ready = true;
+                        provider_sm_->trigger_stream_ready();
+                    }
                 }
             } else if (response.has_batch_actuate_stream_request()) {
                 handle_actuation_request(response.batch_actuate_stream_request(), stream.get());
+            } else if (response.has_publish_values_response()) {
+                // Handle publish errors (success = no response, errors are reported here)
+                const auto& pub_response = response.publish_values_response();
+                if (pub_response.status_size() > 0) {
+                    for (const auto& [signal_id, error] : pub_response.status()) {
+                        LOG(WARNING) << "Publish error for signal " << signal_id
+                                     << ": code=" << error.code() << " msg=" << error.message();
+                    }
+                }
             }
+        }
+
+        // Clear stream pointer before finishing
+        {
+            std::lock_guard<std::mutex> lock(provider_stream_mutex_);
+            provider_stream_ = nullptr;
         }
 
         auto grpc_finish_status = stream->Finish();
@@ -754,8 +826,9 @@ private:
             }
         }
 
-        // Send response
+        // Send response (must hold mutex to synchronize with publish_batch_impl)
         if (running_) {
+            std::lock_guard<std::mutex> lock(provider_stream_mutex_);
             OpenProviderStreamRequest stream_req;
             auto* response = stream_req.mutable_batch_actuate_stream_response();
             stream->Write(stream_req);
@@ -968,6 +1041,11 @@ private:
     std::thread provider_thread_;
     std::unique_ptr<DatabrokerConnectionStateMachine> provider_sm_;
 
+    // Provider stream access for batch publishing (protected by mutex)
+    mutable std::mutex provider_stream_mutex_;
+    grpc::ClientReaderWriter<OpenProviderStreamRequest, OpenProviderStreamResponse>* provider_stream_ = nullptr;
+    std::atomic<uint32_t> publish_request_id_{0};
+
     // Subscriber stream
     std::unique_ptr<ClientContext> subscriber_context_;
     std::thread subscriber_thread_;
@@ -982,6 +1060,13 @@ private:
     };
 
     std::vector<ActuatorRegistration> actuator_handlers_;
+
+    // Signal providers (for streaming publish)
+    struct SignalProviderRegistration {
+        std::string path;
+        int32_t signal_id;
+    };
+    std::vector<SignalProviderRegistration> signal_providers_;
 
     // Subscriptions
     mutable std::mutex subscriptions_mutex_;

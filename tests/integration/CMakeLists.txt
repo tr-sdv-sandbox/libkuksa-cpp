@@ -97,6 +97,25 @@ target_link_libraries(test_unified_client_integration
 
 gtest_discover_tests(test_unified_client_integration)
 
+# Streaming batch publish integration test
+add_executable(test_streaming_batch_publish
+    test_streaming_batch_publish.cpp
+)
+
+target_include_directories(test_streaming_batch_publish
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(test_streaming_batch_publish
+    PRIVATE
+        kuksa
+        GTest::gtest
+        glog::glog
+)
+
+gtest_discover_tests(test_streaming_batch_publish)
+
 # Testing library integration test
 if(WITH_TESTING)
     add_executable(test_testing_library_integration
