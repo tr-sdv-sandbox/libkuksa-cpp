@@ -269,6 +269,60 @@ public:
     ) = 0;
 
     // ========================================================================
+    // SIGNAL PROVIDER REGISTRATION
+    // ========================================================================
+
+    /**
+     * @brief Register signals that this client will provide (publish)
+     *
+     * Must be called BEFORE start() to claim ownership of signals for
+     * efficient streaming publish via publish_batch().
+     *
+     * This is required for batch publishing to work. Without registration,
+     * publish_batch() will fail with "provider has not claimed the signals".
+     *
+     * @param handles List of signal handles to provide
+     * @throws std::logic_error if client is already running
+     *
+     * Example:
+     * @code
+     * auto speed = resolver->get<float>("Vehicle.Speed");
+     * auto temp = resolver->get<float>("Vehicle.Cabin.Temperature");
+     *
+     * client->provide_signals({speed, temp});  // Claim ownership
+     * client->start();
+     *
+     * // Now batch publishing works via efficient streaming API
+     * client->publish_batch({{speed, 50.0f}, {temp, 22.5f}});
+     * @endcode
+     */
+    template<typename... Ts>
+    void provide_signals(const SignalHandle<Ts>&... handles) {
+        (provide_signal_impl(handles.path(), handles.id()), ...);
+    }
+
+    /**
+     * @brief Register a single signal for providing
+     */
+    template<typename T>
+    void provide_signal(const SignalHandle<T>& handle) {
+        provide_signal_impl(handle.path(), handle.id());
+    }
+
+    /**
+     * @brief Register a dynamic signal for providing
+     */
+    void provide_signal(const DynamicSignalHandle& handle) {
+        provide_signal_impl(handle.path(), handle.id());
+    }
+
+    /**
+     * @brief Internal implementation for signal provider registration
+     * @throws std::logic_error if client is already running
+     */
+    virtual void provide_signal_impl(const std::string& path, int32_t signal_id) = 0;
+
+    // ========================================================================
     // SYNCHRONOUS READ/WRITE API
     // ========================================================================
 

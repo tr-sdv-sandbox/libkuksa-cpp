@@ -14,17 +14,26 @@ mkdir build && cd build
 cmake .. -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON -DWITH_TESTING=ON
 cmake --build . -j$(nproc)
 
-# Run all tests
+# Run all tests (unit + integration)
 ctest --output-on-failure
 
-# Run specific unit tests
+# Run specific test by name pattern
+ctest -R "state_machine" --output-on-failure
+
+# Run unit tests (no Docker required)
 ./tests/state_machine_tests
 ./tests/all_vss_types_tests
 ./tests/accessor_handle_creation_tests
+./tests/testing_framework_tests
 
-# Run specific integration tests (requires KUKSA databroker)
+# Run integration tests (auto-starts KUKSA Docker container)
 ./tests/integration/test_kuksa_communication
 ./tests/integration/test_unified_client_integration
+./tests/integration/test_all_types_integration
+./tests/integration/test_streaming_batch_publish
+
+# Run single Google Test case
+./tests/state_machine_tests --gtest_filter="StateMachineTest.BasicTransition"
 
 # Install system-wide
 sudo make install && sudo ldconfig
@@ -52,11 +61,14 @@ User Application
 - Single gRPC channel with two logical streams (OpenProviderStream, SubscribeById)
 - Sync operations (get, set) work without `start()`
 - Async operations (subscribe, publish, serve_actuator) require `start()`
-- Auto-routes operations based on signal class
+- Auto-routes operations based on signal class (actuator → Actuate RPC, sensor → PublishValue)
+- `provide_signals()` - register signals before `start()` for streaming batch publish
+- `publish_batch()` - efficient multi-signal publish via provider stream
 
 **SignalHandle<T>** (`include/kuksa_cpp/types.hpp`)
 - Lightweight, copyable, default-constructible typed handle
 - Works for sensors, actuators, and attributes
+- Contains signal ID, path, type, and signal class
 
 **State Machines** (`include/kuksa_cpp/state_machine/`)
 - Generic `StateMachine<StateEnum>` for application logic
@@ -81,6 +93,13 @@ VSS types map to C++ types with automatic conversion:
 
 All operations return `QualifiedValue<T>` with quality (VALID, INVALID, NOT_AVAILABLE, STALE), value, and timestamp.
 
+### Narrowing Type Conversion
+
+The `detail::wire_type<T>` trait and `detail::try_extract_value<T>()` in `client.hpp` handle automatic conversion between wire types (int32/uint32) and narrowing types (int8/int16/uint8/uint16). This conversion is applied in:
+- `get()` - extracts value from protobuf response
+- `subscribe()` - converts values in subscription callbacks
+- `serve_actuator()` - converts actuation target values
+
 ## Key Files
 
 - `include/kuksa_cpp/kuksa.hpp` - Main include combining all APIs
@@ -98,10 +117,19 @@ System packages (Ubuntu): `build-essential cmake libgrpc++-dev libprotobuf-dev p
 
 ## Testing
 
-- Unit tests: Google Test in `tests/`
-- Integration tests: `tests/integration/` (require Docker KUKSA databroker)
+- Unit tests: Google Test in `tests/` (no external dependencies)
+- Integration tests: `tests/integration/` (auto-start KUKSA Docker container via `KuksaTestFixture`)
+- Set `KUKSA_ADDRESS=host:port` to use external databroker instead of Docker
 - Testing library: YAML-based declarative testing in `include/kuksa_cpp/testing/`
 - CI runs on Ubuntu 24.04 via GitHub Actions
+
+### Integration Test Fixture
+
+Tests inherit from `KuksaTestFixture` which:
+1. Starts KUKSA databroker Docker container automatically
+2. Creates test VSS schema with `Vehicle.Private.Test.*` signals
+3. Cleans up container after tests complete
+4. Skips tests gracefully if Docker unavailable
 
 ## Examples
 

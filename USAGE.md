@@ -174,6 +174,49 @@ if (!ready_status.ok()) {
 client->publish(speed_handle, 120.5f);
 ```
 
+#### Streaming Batch Publish
+
+For high-throughput sensor publishing, use `provide_signals()` to register signals before `start()`, then use `publish_batch()` for efficient streaming:
+
+```cpp
+// 1. Resolve signal handles
+kuksa::SignalHandle<float> speed, temperature, rpm;
+resolver->signals()
+    .add(speed, "Vehicle.Speed")
+    .add(temperature, "Vehicle.Cabin.Temperature")
+    .add(rpm, "Vehicle.Powertrain.CombustionEngine.Speed")
+    .resolve();
+
+// 2. Register as signal provider BEFORE start()
+client->provide_signals(speed, temperature, rpm);
+
+// 3. Start client - claims signals on provider stream
+client->start();
+client->wait_until_ready(std::chrono::seconds(5));
+
+// 4. Batch publish via efficient streaming API
+client->publish_batch({
+    {speed, 120.5f},
+    {temperature, 22.0f},
+    {rpm, 3500}
+});
+
+// Optional: callback for error handling
+client->publish_batch(
+    {{speed, 125.0f}, {temperature, 23.0f}},
+    [](const std::map<int32_t, absl::Status>& errors) {
+        for (const auto& [id, status] : errors) {
+            LOG(ERROR) << "Signal " << id << " failed: " << status;
+        }
+    }
+);
+```
+
+**Key points:**
+- `provide_signals()` must be called BEFORE `start()`
+- Batch publish uses the provider stream (more efficient than individual RPCs)
+- Errors are reported asynchronously via optional callback
+
 ### Signal Handles
 
 `SignalHandle<T>` is a lightweight, copyable handle representing a VSS signal. The same type is used for all signal classes (sensor, actuator, attribute).

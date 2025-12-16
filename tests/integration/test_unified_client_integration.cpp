@@ -173,13 +173,16 @@ TEST_F(UnifiedClientIntegrationTest, BatchPublishing) {
     ASSERT_TRUE(sub_start_status.ok()) << "Failed to start subscriber: " << sub_start_status;
     ASSERT_TRUE(subscriber->wait_until_ready(5000ms).ok());
 
-    // Publisher publishes sensors (no registration needed!)
+    // Publisher publishes sensors (must register signals before start!)
     auto speed_rw_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
     auto rpm_rw_result = resolver->get<uint32_t>("Vehicle.Private.Test.UInt32Sensor");
 
     ASSERT_TRUE(speed_rw_result.ok() && rpm_rw_result.ok());
     auto speed_rw = *speed_rw_result;
     auto rpm_rw = *rpm_rw_result;
+
+    // Register signal providers before start
+    publisher->provide_signals(speed_rw, rpm_rw);
 
     auto pub_start_status = publisher->start();
     ASSERT_TRUE(pub_start_status.ok()) << "Failed to start publisher: " << pub_start_status;
@@ -468,10 +471,13 @@ TEST_F(UnifiedClientIntegrationTest, ConcurrentOperations) {
     ASSERT_TRUE(act_start_status.ok()) << "Failed to start actuator client: " << act_start_status;
     ASSERT_TRUE(actuator_client->wait_until_ready(5000ms).ok());
 
-    // Publisher client publishes sensor (no registration needed!)
+    // Publisher client publishes sensor (must register signals before start!)
     auto sensor_rw_result = resolver->get<float>("Vehicle.Private.Test.FloatSensor");
     ASSERT_TRUE(sensor_rw_result.ok());
     auto sensor_rw = *sensor_rw_result;
+
+    // Register signal provider before start
+    publisher_client->provide_signal(sensor_rw);
 
     auto pub_start_status2 = publisher_client->start();
     ASSERT_TRUE(pub_start_status2.ok()) << "Failed to start publisher client: " << pub_start_status2;
