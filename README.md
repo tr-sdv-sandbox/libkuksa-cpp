@@ -9,6 +9,7 @@ Modern C++ library for interacting with KUKSA.val databroker using the Vehicle S
 - **VSS 5.1 support** with transparent type mapping (int8/16, uint8/16)
 - **Unified client** - Single connection for all operations
 - **Batch operations** - Fluent API for resolving and reading multiple signals
+- **Streaming batch publish** - High-throughput sensor publishing via provider stream
 - **State machine library** - Observable state machines for application logic
 - **Thread-safe** - Safe concurrent access from multiple threads
 

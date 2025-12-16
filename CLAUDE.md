@@ -62,7 +62,8 @@ User Application
 - Sync operations (get, set) work without `start()`
 - Async operations (subscribe, publish, serve_actuator) require `start()`
 - Auto-routes operations based on signal class (actuator → Actuate RPC, sensor → PublishValue)
-- Batch publish via `publish_batch()` for efficient multi-signal updates
+- `provide_signals()` - register signals before `start()` for streaming batch publish
+- `publish_batch()` - efficient multi-signal publish via provider stream
 
 **SignalHandle<T>** (`include/kuksa_cpp/types.hpp`)
 - Lightweight, copyable, default-constructible typed handle
